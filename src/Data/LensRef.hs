@@ -176,7 +176,7 @@ create the same type of references in multiple monads.
 
 @(Extref m) === (StateT s m)@, where 's' is an extendible state.
 
-For basic usage examples, look into the source of @Data.LensRef.Pure.Test@.
+For basic usage examples, look into the source of @Data.LensRef.Test@.
 -}
 class (Monad m, RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRefCreator m where
 

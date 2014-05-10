@@ -16,8 +16,8 @@ TODO
 - optimiziation: equality check
 -}
 module Data.LensRef.Fast
-    ( Pure
-    , runPure
+    ( Register
+    , runRegister
     ) where
 
 import Data.Monoid
@@ -149,13 +149,13 @@ instance MonadBaseControl IO m => MonadRefWriter (Wrap m) where
 
 ---------------------------------
 
-type Register n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
+type Register_ n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
 
-newtype Reg n a = Reg { unReg :: ReaderT (SLSt n () -> n ()) (Register n (SLSt n)) a } deriving (Monad, Applicative, Functor)
+newtype Reg n a = Reg { unReg :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a } deriving (Monad, Applicative, Functor)
 
 type SLSt (m :: * -> *) = m
 
-type Pure m = Reg (Wrap m)
+type Register m = Reg (Wrap m)
 {-
 mapReg :: (forall a . m a -> n a) -> Reg m a -> Reg n a
 mapReg ff (Reg m) = Reg $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
@@ -165,33 +165,33 @@ instance MonadTrans Reg where
     lift = Reg . lift . lift . lift
 -}
 
-instance MonadFix m => MonadFix (Pure m) where
+instance MonadFix m => MonadFix (Register m) where
     mfix f = Reg $ mfix $ unReg . f
 
-instance MonadBaseControl IO m => MonadRefReader (Pure m) where
+instance MonadBaseControl IO m => MonadRefReader (Register m) where
 
-    type BaseRef (Pure m) = Lens_ m
+    type BaseRef (Register m) = Lens_ m
 
     liftRefReader = Reg . lift . lift . liftRefReader
 
-instance MonadBaseControl IO m => MonadRefCreator (Pure m) where
+instance MonadBaseControl IO m => MonadRefCreator (Register m) where
     extRef r l = Reg . lift . lift . extRef r l
     newRef = Reg . lift . lift . newRef
 
-instance MonadBaseControl IO m => MonadMemo (Pure m) where
+instance MonadBaseControl IO m => MonadMemo (Register m) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
     future = future_
 -}
-instance MonadBaseControl IO m => MonadRefWriter (Pure m) where
+instance MonadBaseControl IO m => MonadRefWriter (Register m) where
     liftRefWriter = Reg . lift . lift . liftRefWriter
 
-instance MonadBaseControl IO m => MonadRegister (Pure m) where
+instance MonadBaseControl IO m => MonadRegister (Register m) where
 
-    type EffectM (Pure m) = m
+    type EffectM (Register m) = m
 
-    newtype Modifier (Pure m) a = RegW {unRegW :: Pure m a} deriving (Monad, Applicative, Functor)
+    newtype Modifier (Register m) a = RegW {unRegW :: Register m a} deriving (Monad, Applicative, Functor)
 
     liftEffectM = Reg . lift . lift . lift
 
@@ -208,23 +208,23 @@ instance MonadBaseControl IO m => MonadRegister (Pure m) where
         writerstate <- ask
         return $ fmap (unWrap . ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
 
-instance (MonadBaseControl IO m, MonadFix m) => MonadFix (Modifier (Pure m)) where
+instance (MonadBaseControl IO m, MonadFix m) => MonadFix (Modifier (Register m)) where
     mfix f = RegW $ mfix $ unRegW . f
 
-instance MonadBaseControl IO m => MonadRefWriter (Modifier (Pure m)) where
+instance MonadBaseControl IO m => MonadRefWriter (Modifier (Register m)) where
     liftRefWriter = RegW . liftRefWriter
 
-instance MonadBaseControl IO m => MonadRefReader (Modifier (Pure m)) where
+instance MonadBaseControl IO m => MonadRefReader (Modifier (Register m)) where
 
-    type BaseRef (Modifier (Pure m)) = Lens_ m
+    type BaseRef (Modifier (Register m)) = Lens_ m
 
     liftRefReader = RegW . liftRefReader
 
-instance MonadBaseControl IO m => MonadRefCreator (Modifier (Pure m)) where
+instance MonadBaseControl IO m => MonadRefCreator (Modifier (Register m)) where
     extRef r l = RegW . extRef r l
     newRef = RegW . newRef
 
-instance MonadBaseControl IO m => MonadMemo (Modifier (Pure m)) where
+instance MonadBaseControl IO m => MonadMemo (Modifier (Register m)) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
@@ -232,8 +232,8 @@ instance MonadBaseControl IO m => MonadMemo (Modifier (Pure m)) where
 -}
 evalRegister ff (Reg m) = runReaderT m ff
 
-runPure :: MonadBaseControl IO m => (forall a . m (m a, a -> m ())) -> Pure m a -> m (a, m ())
-runPure newChan (Reg m) = unWrap $ do
+runRegister :: MonadBaseControl IO m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
+runRegister newChan (Reg m) = unWrap $ do
     (read, write) <- Wrap newChan
     (a, tick) <- do
         (a, r) <- runRefWriterT $ runReaderT m $ Wrap . write
@@ -251,8 +251,8 @@ toSend
     -> (n () -> m ())
     -> RefReader m b
     -> b -> (b -> c)
-    -> (b -> b -> c -> {-Either (Register m c)-} (Register n m (c -> Register n m c)))
-    -> Register n m (RefReader m c)
+    -> (b -> b -> c -> {-Either (Register m c)-} (Register_ n m (c -> Register_ n m c)))
+    -> Register_ n m (RefReader m c)
 toSend memoize li rb b0 c0 fb = do
     let doit st = readRef st >>= runMonadMonoid . fst
         reg st msg = readRef st >>= li . runMonadMonoid . ($ msg) . snd

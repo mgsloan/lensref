@@ -6,13 +6,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_HADDOCK hide #-}
 {- |
-Pure reference implementation for the @MonadRefCreator@ interface.
+Register reference implementation for the @MonadRefCreator@ interface.
 
 The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 -}
 module Data.LensRef.Pure
-    ( Pure
-    , runPure
+    ( Register
+    , runRegister
     , memoRead_
     ) where
 
@@ -138,86 +138,86 @@ instance Monad m => MonadRefWriter (StateT LSt m) where
 ---------------------------------
 
 
-type Register n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
+type Register_ n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
 
-newtype Pure n a = Pure { unPure :: ReaderT (SLSt n () -> n ()) (Register n (SLSt n)) a } deriving (Monad, Applicative, Functor)
+newtype Register n a = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a } deriving (Monad, Applicative, Functor)
 
 type SLSt = StateT LSt
 {-
-mapReg :: (forall a . m a -> n a) -> Pure m a -> Pure n a
-mapReg ff (Pure m) = Pure $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
+mapReg :: (forall a . m a -> n a) -> Register m a -> Register n a
+mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
     ff $ flip runStateT s $ flip runReaderT (iso undefined undefined `lensMap` r) $ runReaderT m $ undefined f
 -}
-instance MonadTrans Pure where
-    lift = Pure . lift . lift . lift
+instance MonadTrans Register where
+    lift = Register . lift . lift . lift
 
-instance MonadFix m => MonadFix (Pure m) where
-    mfix f = Pure $ mfix $ unPure . f
+instance MonadFix m => MonadFix (Register m) where
+    mfix f = Register $ mfix $ unRegister . f
 
-instance Monad m => MonadRefReader (Pure m) where
+instance Monad m => MonadRefReader (Register m) where
 
-    type BaseRef (Pure n) = Lens_ LSt
+    type BaseRef (Register n) = Lens_ LSt
 
-    liftRefReader = Pure . lift . lift . liftRefReader
+    liftRefReader = Register . lift . lift . liftRefReader
 
-instance Monad n => MonadRefCreator (Pure n) where
-    extRef r l = Pure . lift . lift . extRef r l
-    newRef = Pure . lift . lift . newRef
+instance Monad n => MonadRefCreator (Register n) where
+    extRef r l = Register . lift . lift . extRef r l
+    newRef = Register . lift . lift . newRef
 
-instance Monad m => MonadMemo (Pure m) where
+instance Monad m => MonadMemo (Register m) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
     future = future_
 -}
-instance Monad n => MonadRefWriter (Pure n) where
-    liftRefWriter = Pure . lift . lift . liftRefWriter
+instance Monad n => MonadRefWriter (Register n) where
+    liftRefWriter = Register . lift . lift . liftRefWriter
 
-instance Monad n => MonadRegister (Pure n) where
+instance Monad n => MonadRegister (Register n) where
 
-    type EffectM (Pure n) = n
+    type EffectM (Register n) = n
 
     liftEffectM = lift
 
-    newtype Modifier (Pure n) a = RegW {unRegW :: Pure n a} deriving (Monad, Applicative, Functor)
+    newtype Modifier (Register n) a = RegW {unRegW :: Register n a} deriving (Monad, Applicative, Functor)
 
     liftModifier = RegW
 
-    onChangeAcc r b0 c0 f = Pure $ ReaderT $ \ff ->
+    onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
         toSend lift r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
 
-    registerCallback f g = Pure $ ReaderT $ \ff -> do
+    registerCallback f g = Register $ ReaderT $ \ff -> do
         tell' (mempty, MonadMonoid . g)
         writerstate <- ask
         return $ fmap (ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
 
-instance Monad m => MonadRefWriter (Modifier (Pure m)) where
+instance Monad m => MonadRefWriter (Modifier (Register m)) where
     liftRefWriter = RegW . liftRefWriter
 
-instance Monad m => MonadRefReader (Modifier (Pure m)) where
+instance Monad m => MonadRefReader (Modifier (Register m)) where
 
-    type BaseRef (Modifier (Pure m)) = Lens_ LSt
+    type BaseRef (Modifier (Register m)) = Lens_ LSt
 
     liftRefReader = RegW . liftRefReader
 
-instance Monad m => MonadRefCreator (Modifier (Pure m)) where
+instance Monad m => MonadRefCreator (Modifier (Register m)) where
     extRef r l = RegW . extRef r l
     newRef = RegW . newRef
 
-instance Monad m => MonadMemo (Modifier (Pure m)) where
+instance Monad m => MonadMemo (Modifier (Register m)) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
     future = future_
 -}
-instance MonadFix m => MonadFix (Modifier (Pure m)) where
+instance MonadFix m => MonadFix (Modifier (Register m)) where
     mfix f = RegW $ mfix $ unRegW . f
 
 
-evalRegister ff (Pure m) = runReaderT m ff
+evalRegister ff (Register m) = runReaderT m ff
 
-runPure :: Monad m => (forall a . m (m a, a -> m ())) -> Pure m a -> m (a, m ())
-runPure newChan (Pure m) = do
+runRegister :: Monad m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
+runRegister newChan (Register m) = do
     (read, write) <- newChan
     ((a, tick), s) <- flip runStateT initLSt $ do
         (a, r) <- runRefWriterT $ runReaderT m write
@@ -234,8 +234,8 @@ toSend
     => (n () -> m ())
     -> RefReader m b
     -> b -> (b -> c)
-    -> (b -> b -> c -> {-Either (Register m c)-} (Register n m (c -> Register n m c)))
-    -> Register n m (RefReader m c)
+    -> (b -> b -> c -> {-Either (Register m c)-} (Register_ n m (c -> Register_ n m c)))
+    -> Register_ n m (RefReader m c)
 toSend li rb b0 c0 fb = do
     let doit st = readRef st >>= runMonadMonoid . fst
         reg st msg = readRef st >>= li . runMonadMonoid . ($ msg) . snd

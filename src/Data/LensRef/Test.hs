@@ -11,7 +11,7 @@ module Data.LensRef.Test
     ( -- * Tests for the interface
       mkTests
     -- * Tests for implementations
-    , testExtPure
+    , testExtRegister
     , testExtFast
     ) where
 
@@ -56,9 +56,9 @@ instance (MonadRefCreator m, Monoid w) => MonadMemo (WriterT w m) where
 
 {-
 -- | Consistency tests for the pure implementation of @Ext@, should give an empty list of errors.
-testExtPure :: [String]
-testExtPure = mkTests $ \t -> let
-    (((), m), w) = runWriter $ Pure.runPure newChan t
+testExtRegister :: [String]
+testExtRegister = mkTests $ \t -> let
+    (((), m), w) = runWriter $ Pure.runRegister newChan t
     in w -- ++ execWriter m
   where
     newChan = return (fail "x", \_ -> return (error "1"))
@@ -67,9 +67,9 @@ testExtPure = mkTests $ \t -> let
 instance MonadWriter [String] IO where
     tell = putStrLn . show
 
-testExtPure = mkTests $ \t -> unsafePerformIO $ do
+testExtRegister = mkTests $ \t -> unsafePerformIO $ do
     hSetBuffering stdout LineBuffering
-    ((), m) <- Pure.runPure newChan' t
+    ((), m) <- Pure.runRegister newChan' t
 
     _ <- forkIO m
     return ["end"]
@@ -81,7 +81,7 @@ testExtPure = mkTests $ \t -> unsafePerformIO $ do
 
 testExtFast = mkTests $ \t -> unsafePerformIO $ do
     hSetBuffering stdout LineBuffering
-    ((), m) <- Fast.runPure newChan' t
+    ((), m) <- Fast.runRegister newChan' t
 
     _ <- forkIO m
     return ["end"]
