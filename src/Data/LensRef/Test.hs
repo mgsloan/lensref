@@ -11,8 +11,8 @@ module Data.LensRef.Test
     ( -- * Tests for the interface
       mkTests
     -- * Tests for implementations
-    , testExtRegister
-    , testExtFast
+    , testPure
+--    , testFast
     ) where
 
 import Control.Monad.State
@@ -70,19 +70,23 @@ instance MonadWriter [String] IO where
     pass = undefined
     tell = putStrLn . show
 
-testExtRegister = mkTests $ \t -> unsafePerformIO $ do
+testPure = do
     hSetBuffering stdout LineBuffering
-    ((), m) <- Pure.runRegister newChan' t
+    w <- execWriterT $ mkTests $ \t -> do
+        ((), m) <- Pure.runRegister newChan' t
+--        _ <- forkIO m   -- TODO
+        return ()
+    return w
 
-    _ <- forkIO m
-    return ["end"]
-   where
-    newChan' :: IO (IO a, a -> IO ())
-    newChan' = do
-        ch <- newChan
-        return (readChan ch, \x -> writeChan ch x)
+type IO' = WriterT [String] IO
 
-testExtFast = mkTests $ \t -> unsafePerformIO $ do
+newChan' :: IO' (IO' a, a -> IO' ())
+newChan' = undefined {-do       -- TODO
+    ch <- newChan
+    return (readChan ch, \x -> writeChan ch x)
+-}
+{-
+testFast = mkTests $ \t -> unsafePerformIO $ do
     hSetBuffering stdout LineBuffering
     ((), m) <- Fast.runRegister newChan' t
 
@@ -93,7 +97,7 @@ testExtFast = mkTests $ \t -> unsafePerformIO $ do
     newChan' = do
         ch <- newChan
         return (readChan ch, \x -> writeChan ch x)
-
+-}
 
 -- | Check an equality.
 (==?) :: (Eq a, Show a, MonadWriter [String] (EffectM m), MonadRegister m) => a -> a -> m ()
@@ -116,23 +120,26 @@ writeRef' = writeRef
 
 Look inside the sources for the tests.
 -}
-mkTests :: ((forall m . (MonadWriter [String] (EffectM m), MonadRegister m, MonadRefWriter m) => m ()) -> [String]) -> [String]
-mkTests runTest
-      = newRefTest
-     ++ writeRefsTest
-     ++ extRefTest
-     ++ joinTest
-     ++ joinTest2
-     ++ chainTest0
-     ++ forkTest
-     ++ forkTest2
-     ++ chainTest
-     ++ chainTest'
-     ++ undoTest
-     ++ undoTest2
-     ++ undoTest3
+mkTests
+    :: (MonadWriter [String] (EffectM m), MonadRegister m, MonadRefWriter m)
+    => (m () -> EffectM m ())
+    -> EffectM m ()
+mkTests runTest = do
+    newRefTest
+    writeRefsTest
+    extRefTest
+    joinTest
+    joinTest2
+    chainTest0
+    forkTest
+    forkTest2
+    chainTest
+    chainTest'
+    undoTest
+    undoTest2
+    undoTest3
 
-     ++ writeRefTest
+--    writeRefTest
   where
 
     newRefTest = runTest $ do
@@ -357,6 +364,16 @@ mkTests runTest
         push m = m >>= \x -> maybe (return ()) liftRefWriter x
         m === t = m >>= \x -> isJust x ==? t
 
+{-
+    onchange x $ \b -> case b of
+        True -> do
+               ...
+               cb <- register ...
+               ...
+
+  runTest :: Register _ _ () ->  TestM () -> Maybe Error
+
+-}
 
 
     writeRefTest = runTest $ do

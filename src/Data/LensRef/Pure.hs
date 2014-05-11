@@ -138,9 +138,12 @@ instance Monad m => MonadRefWriter (StateT LSt m) where
 ---------------------------------
 
 
-type Register_ n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
+type Register_ n m
+    = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
 
-newtype Register n a = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a } deriving (Monad, Applicative, Functor)
+newtype Register n a
+    = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a }
+        deriving (Monad, Applicative, Functor)
 
 type SLSt = StateT LSt
 {-
@@ -219,13 +222,28 @@ evalRegister ff (Register m) = runReaderT m ff
 runRegister :: Monad m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan (Register m) = do
     (read, write) <- newChan
+    (a, c) <- runRegister_ read write (Register m)
+    return (a, flatCont c)
+
+--runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> n ()) -> Register m n a -> m (a, m ())
+
+newtype Cont m = Cont (m (Cont m))
+
+flatCont :: Monad m => Cont m -> m ()
+flatCont (Cont m) = m >>= flatCont
+
+runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, Cont m)
+runRegister_ read write (Register m) = do
     ((a, tick), s) <- flip runStateT initLSt $ do
         (a, r) <- runRefWriterT $ runReaderT m write
         (w, _) <- readRef r
         return (a, runMonadMonoid w)
-    return $ (,) a $ flip evalStateT s $ forever $ do
-        join $ lift read
-        tick
+    let eval s = Cont $ do
+            s <- flip execStateT s $ do
+                join $ lift read
+                tick
+            return $ eval s
+    return $ (,) a $ eval s
 
 
 
@@ -276,7 +294,7 @@ toSend li rb b0 c0 fb = do
 
 ----------------
 
--- Ref-based RefWriterT
+-- Ref-based WriterT
 type RefWriterT w m = ReaderT (Ref m w) m
 
 runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)

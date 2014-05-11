@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -34,7 +35,12 @@ import Data.LensRef.Pure (memoRead_)
 
 ----------------------
 
-newtype Wrap (m :: * -> *) a = Wrap {unWrap :: m a} deriving (Monad, Functor, Applicative, MonadFix)
+newtype Wrap m a
+    = Wrap {unWrap :: m a}
+        deriving (Monad, Functor, Applicative, MonadFix)
+
+instance NewRef m => NewRef (Wrap m) where
+    newRef' x = Wrap $ liftM (\(Morph f) -> Morph $ \g -> Wrap $ f $ mapStateT unWrap g) $ newRef' x
 
 instance MonadTrans Wrap where
     lift = Wrap
@@ -60,7 +66,7 @@ joinLens m = Lens_
     , register = \e -> m >>= \r -> register r e
     }
 
-instance MonadBaseControl IO m => RefClass (Lens_ m) where
+instance NewRef m => RefClass (Lens_ m) where
     type RefReaderSimple (Lens_ m) = Wrap m
 
     readRefSimple = readPart . joinLens
@@ -78,63 +84,63 @@ instance MonadBaseControl IO m => RefClass (Lens_ m) where
                 , register = \_ -> return ()
                 }
 
-instance MonadBaseControl IO m => MonadRefReader (Wrap m) where
+instance NewRef m => MonadRefReader (Wrap m) where
 
     type BaseRef (Wrap m) = Lens_ m
 
     liftRefReader = id
 
-instance MonadBaseControl IO m => MonadRefReader (RefWriterOf (Wrap m)) where
+instance NewRef m => MonadRefReader (RefWriterOf (Wrap m)) where
 
     type BaseRef (RefWriterOf (Wrap m)) = Lens_ m
 
     liftRefReader = RefWriterOfIO
 
-instance MonadBaseControl IO m => MonadRefWriter (RefWriterOf (Wrap m)) where
+instance NewRef m => MonadRefWriter (RefWriterOf (Wrap m)) where
     liftRefWriter = id -- RefWriterOfIO . runRefWriterOfIO
 
-
-wrap :: MonadBaseControl IO m => IO a -> Wrap m a
+{-
+wrap :: NewRef m => IO a -> Wrap m a
 wrap m = Wrap $ liftBaseWith $ const m
-
-instance MonadBaseControl IO m => MonadRefCreator (Wrap m) where
+-}
+instance NewRef m => MonadRefCreator (Wrap m) where
 
     extRef r r2 a0 = do
         Lens_ rb wb tb <- r
         b0 <- rb
-        va <- wrap $ newMVar $ set r2 b0 a0
-        reg <- wrap $ newMVar $ return ()
-        status <- wrap $ newMVar True -- True: normal; False:
+        va <- newRef' $ set r2 b0 a0
+        reg <- newRef' $ return ()
+        status <- newRef' True -- True: normal; False:
         tb $ do
-            s <- wrap $ readMVar status
+            s <- runMorph status get
             when s $ do
                 b <- rb
-                wrap $ modifyMVar va $ \a -> return (set r2 b a, ())
-                join $ wrap $ readMVar reg
+                runMorph va $ modify (set r2 b)
+                join $ runMorph reg get
         return $
             return Lens_
-                { readPart = wrap $ readMVar va
+                { readPart = runMorph va get
                 , writePart = \a -> do
-                    _ <- wrap $ swapMVar va a
-                    _ <- wrap $ swapMVar status False
+                    runMorph va $ put a
+                    runMorph status $ put False
                     wb $ a ^. r2
-                    _ <- wrap $ swapMVar status True
-                    join $ wrap $ readMVar reg
-                , register = \m -> wrap $ modifyMVar reg $ \x -> return (x >> m, ())
+                    runMorph status $ put True
+                    join $ runMorph reg get
+                , register = \m -> runMorph reg $ modify (>> m)
                 }
 
     newRef a0 = do
-        va <- wrap $ newMVar a0
-        reg <- wrap $ newMVar $ return ()
+        va <- newRef' a0
+        reg <- newRef' $ return ()
         return $ return Lens_
-                { readPart = wrap $ readMVar va
+                { readPart = runMorph va get
                 , writePart = \a -> do
-                    _ <- wrap $ swapMVar va a
-                    join $ wrap $ readMVar reg
-                , register = \m -> wrap $ modifyMVar reg $ \x -> return (x >> m, ())
+                    runMorph va $ put a
+                    join $ runMorph reg get
+                , register = \m -> runMorph reg $ modify (>> m)
                 }
 
-instance MonadBaseControl IO m => MonadMemo (Wrap m) where
+instance NewRef m => MonadMemo (Wrap m) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
@@ -143,7 +149,7 @@ instance MonadBaseControl IO m => MonadMemo (Wrap m) where
 -}
 
 
-instance MonadBaseControl IO m => MonadRefWriter (Wrap m) where
+instance NewRef m => MonadRefWriter (Wrap m) where
     liftRefWriter = runRefWriterOfIO
 
 
@@ -168,26 +174,26 @@ instance MonadTrans Reg where
 instance MonadFix m => MonadFix (Register m) where
     mfix f = Reg $ mfix $ unReg . f
 
-instance MonadBaseControl IO m => MonadRefReader (Register m) where
+instance NewRef m => MonadRefReader (Register m) where
 
     type BaseRef (Register m) = Lens_ m
 
     liftRefReader = Reg . lift . lift . liftRefReader
 
-instance MonadBaseControl IO m => MonadRefCreator (Register m) where
+instance NewRef m => MonadRefCreator (Register m) where
     extRef r l = Reg . lift . lift . extRef r l
     newRef = Reg . lift . lift . newRef
 
-instance MonadBaseControl IO m => MonadMemo (Register m) where
+instance NewRef m => MonadMemo (Register m) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
     future = future_
 -}
-instance MonadBaseControl IO m => MonadRefWriter (Register m) where
+instance NewRef m => MonadRefWriter (Register m) where
     liftRefWriter = Reg . lift . lift . liftRefWriter
 
-instance MonadBaseControl IO m => MonadRegister (Register m) where
+instance NewRef m => MonadRegister (Register m) where
 
     type EffectM (Register m) = m
 
@@ -208,23 +214,23 @@ instance MonadBaseControl IO m => MonadRegister (Register m) where
         writerstate <- ask
         return $ fmap (unWrap . ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
 
-instance (MonadBaseControl IO m, MonadFix m) => MonadFix (Modifier (Register m)) where
+instance (NewRef m, MonadFix m) => MonadFix (Modifier (Register m)) where
     mfix f = RegW $ mfix $ unRegW . f
 
-instance MonadBaseControl IO m => MonadRefWriter (Modifier (Register m)) where
+instance NewRef m => MonadRefWriter (Modifier (Register m)) where
     liftRefWriter = RegW . liftRefWriter
 
-instance MonadBaseControl IO m => MonadRefReader (Modifier (Register m)) where
+instance NewRef m => MonadRefReader (Modifier (Register m)) where
 
     type BaseRef (Modifier (Register m)) = Lens_ m
 
     liftRefReader = RegW . liftRefReader
 
-instance MonadBaseControl IO m => MonadRefCreator (Modifier (Register m)) where
+instance NewRef m => MonadRefCreator (Modifier (Register m)) where
     extRef r l = RegW . extRef r l
     newRef = RegW . newRef
 
-instance MonadBaseControl IO m => MonadMemo (Modifier (Register m)) where
+instance NewRef m => MonadMemo (Modifier (Register m)) where
     memoRead = memoRead_
 {-
     memoWrite = memoWrite_
@@ -232,7 +238,7 @@ instance MonadBaseControl IO m => MonadMemo (Modifier (Register m)) where
 -}
 evalRegister ff (Reg m) = runReaderT m ff
 
-runRegister :: MonadBaseControl IO m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
+runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan (Reg m) = unWrap $ do
     (read, write) <- Wrap newChan
     (a, tick) <- do
@@ -312,5 +318,21 @@ newtype MonadMonoid a = MonadMonoid { runMonadMonoid :: a () }
 instance Monad m => Monoid (MonadMonoid m) where
     mempty = MonadMonoid $ return ()
     MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ a >> b
+
+---------------------
+
+class Monad m => NewRef m where
+    newRef' :: a -> m (Morph (StateT a m) m)
+
+instance NewRef IO where
+    newRef' x = do
+        vx <- liftIO $ newMVar x
+        return $ Morph $ \m -> modifyMVar vx $ liftM swap . runStateT m
+      where
+        swap (a, b) = (b, a)
+
+newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
+
+
 
 
