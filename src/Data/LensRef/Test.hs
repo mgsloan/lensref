@@ -17,6 +17,7 @@ module Data.LensRef.Test
 
 import Control.Monad.State
 import Control.Monad.Writer
+import Control.Monad.Trans.Control
 import Control.Concurrent
 import Control.Category
 import Control.Arrow ((***))
@@ -52,7 +53,7 @@ instance (MonadRefCreator m, MonadRefWriter m, Monoid w) => MonadRefWriter (Writ
 
 instance (MonadRefCreator m, Monoid w) => MonadMemo (WriterT w m) where
 
-    -- memoRead (Wrap m) = liftM Wrap $ Wrap $ memoRead m
+    memoRead m = liftM restoreT $ liftWith $ \unlift -> memoRead $ unlift m
 
 {-
 -- | Consistency tests for the pure implementation of @Ext@, should give an empty list of errors.
@@ -65,6 +66,8 @@ testExtRegister = mkTests $ \t -> let
 -}
 
 instance MonadWriter [String] IO where
+    listen = undefined
+    pass = undefined
     tell = putStrLn . show
 
 testExtRegister = mkTests $ \t -> unsafePerformIO $ do

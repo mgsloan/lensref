@@ -50,7 +50,7 @@ module Data.LensRef
     ) where
 
 
-import Control.Monad (liftM, join)
+import Control.Monad
 import Control.Lens (Lens', lens, set)
 
 --------------------------------
