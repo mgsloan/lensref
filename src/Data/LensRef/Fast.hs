@@ -67,12 +67,12 @@ instance MonadBaseControl IO m => RefClass (Lens_ m) where
     writeRefSimple m = RefWriterOfIO . writePart (joinLens m)
     lensMap l m = do
         Lens_ r w t <- m
-        return $ Lens_
+        return Lens_
             { readPart = r >>= \a -> return $ a ^. l
             , writePart = \b -> r >>= \a -> w $ set l b a
             , register = t
             }
-    unitRef = return $ Lens_
+    unitRef = return Lens_
                 { readPart = return ()
                 , writePart = const $ return ()
                 , register = \_ -> return ()
@@ -95,7 +95,7 @@ instance MonadBaseControl IO m => MonadRefWriter (RefWriterOf (Wrap m)) where
 
 
 wrap :: MonadBaseControl IO m => IO a -> Wrap m a
-wrap m = Wrap $ liftBaseWith $ \_ -> m
+wrap m = Wrap $ liftBaseWith $ const m
 
 instance MonadBaseControl IO m => MonadRefCreator (Wrap m) where
 
@@ -111,8 +111,8 @@ instance MonadBaseControl IO m => MonadRefCreator (Wrap m) where
                 b <- rb
                 wrap $ modifyMVar va $ \a -> return (set r2 b a, ())
                 join $ wrap $ readMVar reg
-        return $ do
-            return $ Lens_
+        return $
+            return Lens_
                 { readPart = wrap $ readMVar va
                 , writePart = \a -> do
                     _ <- wrap $ swapMVar va a
@@ -126,7 +126,7 @@ instance MonadBaseControl IO m => MonadRefCreator (Wrap m) where
     newRef a0 = do
         va <- wrap $ newMVar a0
         reg <- wrap $ newMVar $ return ()
-        return $ return $ Lens_
+        return $ return Lens_
                 { readPart = wrap $ readMVar va
                 , writePart = \a -> do
                     _ <- wrap $ swapMVar va a
@@ -251,7 +251,7 @@ toSend
     -> (n () -> m ())
     -> RefReader m b
     -> b -> (b -> c)
-    -> (b -> b -> c -> {-Either (Register m c)-} (Register_ n m (c -> Register_ n m c)))
+    -> (b -> b -> c -> {-Either (Register m c)-} Register_ n m (c -> Register_ n m c))
     -> Register_ n m (RefReader m c)
 toSend memoize li rb b0 c0 fb = do
     let doit st = readRef st >>= runMonadMonoid . fst

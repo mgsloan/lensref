@@ -20,7 +20,7 @@ import Data.Monoid
 import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Arrow ((***))
+import Control.Arrow (second)
 import Data.Sequence hiding (singleton, filter)
 import Control.Lens hiding ((|>))
 import Data.Foldable (toList)
@@ -82,7 +82,7 @@ instance Monad m => MonadRefCreator (StateT LSt m) where
 
         extend x0 = (return $ Lens_ $ lens get set, x0 |> CC kr (kr x0 a0))
           where
-            limit = (id *** toList) . splitAt (length x0)
+            limit = second toList . splitAt (length x0)
 
             get = unsafeData . head . snd . limit
 
@@ -234,7 +234,7 @@ toSend
     => (n () -> m ())
     -> RefReader m b
     -> b -> (b -> c)
-    -> (b -> b -> c -> {-Either (Register m c)-} (Register_ n m (c -> Register_ n m c)))
+    -> (b -> b -> c -> {-Either (Register m c)-} Register_ n m (c -> Register_ n m c))
     -> Register_ n m (RefReader m c)
 toSend li rb b0 c0 fb = do
     let doit st = readRef st >>= runMonadMonoid . fst

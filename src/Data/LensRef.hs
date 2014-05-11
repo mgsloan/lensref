@@ -276,7 +276,7 @@ class (MonadRefCreator m, Monad (EffectM m), MonadRefWriter (Modifier m), MonadR
         -> m (RefReader m c)
 
     onChange :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
-    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM (\x _ -> x) $ f b
+    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
     onChangeSimple :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
     onChangeSimple r f = onChange r $ return . f
@@ -366,7 +366,7 @@ toEqRef :: (RefClass r, Eq a) => RefSimple r a -> EqRefSimple r a
 toEqRef r = do
     a <- readRef r
     r_ <- r
-    return $ EqRefCore r_ $ (/= a)
+    return $ EqRefCore r_ (/= a)
 
 -- | TODO
 newEqRef :: (MonadRefCreator m, Eq a) => a -> m (EqRef m a) 
