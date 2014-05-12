@@ -57,15 +57,18 @@ library
                   , transformers == 0.3.*
                   , mtl == 2.1.*
                   , monad-control == 0.3.*
+                  , operational == 0.2.*
                   , lens == 4.1.*
                   , containers == 0.5.*
 
   exposed-modules:
                     Data.LensRef
+                    Data.LensRef.Common
+                    Data.LensRef.TestEnv
+                    Data.LensRef.Test
                     Data.LensRef.Pure
                     Data.LensRef.Fast
                     Data.LensRef.Default
-                    Data.LensRef.Test
   if flag(Pure)
     cpp-options:
                     -D__PURE__

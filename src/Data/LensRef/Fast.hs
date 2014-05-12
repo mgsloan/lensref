@@ -4,7 +4,6 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_HADDOCK hide #-}
@@ -19,19 +18,19 @@ TODO
 module Data.LensRef.Fast
     ( Register
     , runRegister
+    , runTests
     ) where
 
 import Data.Monoid
---import qualified Data.Map
-import Control.Concurrent
 import Control.Applicative hiding (empty)
-import Control.Monad.Trans.Control
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Lens
 
 import Data.LensRef
-import Data.LensRef.Pure (memoRead_)
+import Data.LensRef.Common
+import Data.LensRef.TestEnv
+import Data.LensRef.Test
 
 ----------------------
 
@@ -209,10 +208,12 @@ instance NewRef m => MonadRegister (Register m) where
     onChangeSimple r f = Reg $ ReaderT $ \ff ->
         toSend False id r undefined undefined $ \b _ _ -> return $ \_ -> evalRegister ff $ f b
 
-    registerCallback f g = Reg $ ReaderT $ \ff -> do
-        tell' (mempty, MonadMonoid . Wrap . g)
+    registerCallback f = Reg $ ReaderT $ \ff -> do
         writerstate <- ask
         return $ fmap (unWrap . ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
+
+    getRegionStatus g = Reg $ ReaderT $ const $
+        tell' (mempty, MonadMonoid . Wrap . g)
 
 instance (NewRef m, MonadFix m) => MonadFix (Modifier (Register m)) where
     mfix f = RegW $ mfix $ unRegW . f
@@ -249,6 +250,15 @@ runRegister newChan (Reg m) = unWrap $ do
         join $ Wrap read
         tick
 
+runRegister_ :: NewRef m => (m (Wrap m ())) -> (Wrap m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ read write (Reg m) = unWrap $ do
+    (a, tick) <- do
+        (a, r) <- runRefWriterT $ runReaderT m $ Wrap . write
+        (w, _) <- readRef r
+        return (a, runMonadMonoid w)
+    return $ (,) a $ unWrap $ forever $ do
+        join $ Wrap read
+        tick
 
 
 toSend
@@ -297,42 +307,24 @@ toSend memoize li rb b0 c0 fb = do
     tell' (act, mempty)
     return $ readRef $ (_1 . _2 . _2) `lensMap` memoref
 
-----------------
+--------------------------
 
--- Ref-based RefWriterT
-type RefWriterT w m = ReaderT (Ref m w) m
+instance MonadRegisterRun (Register (Prog TP)) where
 
-runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)
-runRefWriterT m = do
-    r <- newRef mempty
-    a <- runReaderT m r
-    return (a, r)
+    type AsocT (Register (Prog TP)) = TP
 
-tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
-tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
+    runReg r w m = runRegister_ (liftM unTP r) (w . TP) m
 
--------------
+newtype TP = TP { unTP :: Wrap (Prog TP) () }
 
-newtype MonadMonoid a = MonadMonoid { runMonadMonoid :: a () }
-
-instance Monad m => Monoid (MonadMonoid m) where
-    mempty = MonadMonoid $ return ()
-    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ a >> b
-
----------------------
-
-class Monad m => NewRef m where
-    newRef' :: a -> m (Morph (StateT a m) m)
-
-instance NewRef IO where
-    newRef' x = do
-        vx <- liftIO $ newMVar x
-        return $ Morph $ \m -> modifyMVar vx $ liftM swap . runStateT m
-      where
-        swap (a, b) = (b, a)
-
-newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
+runTests = do
+    mkTests runTestSimple
+    tests runTest
 
 
+runTest :: (Eq a, Show a) => Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
+runTest = runTest_ (TP . lift) runReg
 
+runTestSimple :: Register (Prog TP) () -> IO ()
+runTestSimple m = runTest m $ return ((), return ())
 

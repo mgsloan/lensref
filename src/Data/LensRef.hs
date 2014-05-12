@@ -283,11 +283,15 @@ class (MonadRefCreator m, Monad (EffectM m), MonadRefWriter (Modifier m), MonadR
 
     data Modifier m a :: *
 
+    -- liftToModifier
     liftModifier :: m a -> Modifier m a
 
-    registerCallback :: Functor f => f (Modifier m ()) -> (RegisteredCallbackCommand -> EffectM m ()) -> m (f (EffectM m ()))
+    registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
 
--- | TODO
+    -- onRegionStatusChange
+    getRegionStatus :: (RegisteredCallbackCommand -> EffectM m ()) -> m ()
+
+-- | TODO   -- RegionStatusChange
 data RegisteredCallbackCommand = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 
@@ -298,25 +302,22 @@ data RegisteredCallbackCommand = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 
 -- | TODO
-registerCallbackSimple :: MonadRegister m => Modifier m () -> (RegisteredCallbackCommand -> EffectM m ()) -> m (EffectM m ())
-registerCallbackSimple m c = do
-    f <- registerCallback (const m) c
-    return $ f ()
+registerCallbackSimple :: MonadRegister m => Modifier m () -> m (EffectM m ())
+registerCallbackSimple = liftM ($ ()) . registerCallback . const
 
 -- | TODO
 onChangeEffect  :: (MonadRegister m, Eq a) => RefReader m a -> (a -> EffectM m b) -> m (RefReader m b)
 onChangeEffect r f = onChangeSimple r $ liftEffectM . f
 
+-- | TODO
+iReallyWantToModify :: MonadRegister m => Modifier m () -> m ()
+iReallyWantToModify = liftEffectM <=< registerCallbackSimple
+
+
 -- | @modRef r f@ === @readRef r >>= writeRef r . f@
 modRef :: (MonadRefWriter m, RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> (a -> a) -> m ()
 r `modRef` f = readRef r >>= writeRef r . f
 
-
--- | TODO
-iReallyWantToModify :: MonadRegister m => Modifier m () -> m ()
-iReallyWantToModify r = do
-    x <- registerCallbackSimple r $ const $ return ()
-    liftEffectM x
 
 
 

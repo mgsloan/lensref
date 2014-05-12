@@ -2,8 +2,12 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_HADDOCK hide #-}
 {- |
 Register reference implementation for the @MonadRefCreator@ interface.
@@ -13,22 +17,24 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 module Data.LensRef.Pure
     ( Register
     , runRegister
-    , memoRead_
+    , runTests
     ) where
 
 import Data.Monoid
-import Control.Applicative hiding (empty)
+import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Arrow (second)
-import Data.Sequence hiding (singleton, filter)
+import qualified Data.Sequence as Seq
 import Control.Lens hiding ((|>))
 import Data.Foldable (toList)
-import Prelude hiding (splitAt, length)
 
 import Unsafe.Coerce
 
 import Data.LensRef
+import Data.LensRef.Common
+import Data.LensRef.TestEnv
+import Data.LensRef.Test
 
 ----------------------
 
@@ -43,7 +49,7 @@ newtype Lens_ a b = Lens_ {unLens_ :: ALens' a b}
 runLens_ :: Reader a (Lens_ a b) -> Lens' a b
 runLens_ r f a = cloneLens (unLens_ $ runReader r a) f a
 
-type LSt = Seq CC
+type LSt = Seq.Seq CC
 
 data CC = forall a . CC (LSt -> a -> a) a
 
@@ -80,13 +86,13 @@ instance Monad m => MonadRefCreator (StateT LSt m) where
         rk = set (runLens_ r) . (^. r2)
         kr = set r2 . (^. runLens_ r)
 
-        extend x0 = (return $ Lens_ $ lens get set, x0 |> CC kr (kr x0 a0))
+        extend x0 = (return $ Lens_ $ lens get set, x0 Seq.|> CC kr (kr x0 a0))
           where
-            limit = second toList . splitAt (length x0)
+            limit = second toList . Seq.splitAt (Seq.length x0)
 
             get = unsafeData . head . snd . limit
 
-            set x a = foldl (\x -> (|>) x . ap_ x) (rk a zs |> CC kr a) ys where
+            set x a = foldl (\x -> (Seq.|>) x . ap_ x) (rk a zs Seq.|> CC kr a) ys where
                 (zs, _ : ys) = limit x
 
         ap_ :: LSt -> CC -> CC
@@ -95,26 +101,6 @@ instance Monad m => MonadRefCreator (StateT LSt m) where
         unsafeData :: CC -> a
         unsafeData (CC _ a) = unsafeCoerce a
 
-{-
-    memoWrite = memoWrite_
-
-    future = future_
-
-future_ :: (MonadRefCreator m, MonadRefWriter m) => (RefReader m a -> m a) -> m a
-future_ f = do
-    s <- newRef $ error "can't see the future"
-    a <- f $ readRef s
-    writeRef s a
-    return a
--}
-memoRead_ :: (MonadRefWriter m, MonadRefCreator m) => m a -> m (m a) 
-memoRead_ g = do
-    s <- newRef Nothing
-    return $ readRef s >>= \x -> case x of
-        Just a -> return a
-        _ -> g >>= \a -> do
-            writeRef s $ Just a
-            return a
 
 instance Monad m => MonadMemo (StateT LSt m) where
     memoRead = memoRead_
@@ -122,15 +108,6 @@ instance Monad m => MonadMemo (StateT LSt m) where
 --instance MonadMemo (RefWriterOf (Reader LSt)) where
 --    memoRead = memoRead_
 
-{-
-memoWrite_ g = do
-    s <- newRef Nothing
-    return $ \b -> readRef s >>= \x -> case x of
-        Just (b', a) | b' == b -> return a
-        _ -> g b >>= \a -> do
-            writeRef s $ Just (b, a)
-            return a
--}
 instance Monad m => MonadRefWriter (StateT LSt m) where
     liftRefWriter = state . runState . runRefWriterOfReaderT
 
@@ -189,10 +166,11 @@ instance Monad n => MonadRegister (Register n) where
     onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
         toSend lift r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
 
-    registerCallback f g = Register $ ReaderT $ \ff -> do
-        tell' (mempty, MonadMonoid . g)
+    registerCallback f = Register $ ReaderT $ \ff -> do
         writerstate <- ask
         return $ fmap (ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
+
+    getRegionStatus g = Register $ ReaderT $ const $ tell' (mempty, MonadMonoid . g)
 
 instance Monad m => MonadRefWriter (Modifier (Register m)) where
     liftRefWriter = RegW . liftRefWriter
@@ -222,30 +200,24 @@ evalRegister ff (Register m) = runReaderT m ff
 runRegister :: Monad m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan (Register m) = do
     (read, write) <- newChan
-    (a, c) <- runRegister_ read write (Register m)
-    return (a, flatCont c)
+    runRegister_ read write (Register m)
 
---runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> n ()) -> Register m n a -> m (a, m ())
 
-newtype Cont m = Cont (m (Cont m))
-
-flatCont :: Monad m => Cont m -> m ()
-flatCont (Cont m) = m >>= flatCont
-
-runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, Cont m)
+runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Register m) = do
     ((a, tick), s) <- flip runStateT initLSt $ do
         (a, r) <- runRefWriterT $ runReaderT m write
         (w, _) <- readRef r
         return (a, runMonadMonoid w)
-    let eval s = Cont $ do
+    let eval s = do
+            m <- read
             s <- flip execStateT s $ do
-                join $ lift read
+                m
                 tick
-            return $ eval s
+            eval s
     return $ (,) a $ eval s
 
-
+------------------------------------
 
 toSend
     :: (Eq b, MonadRefCreator m, MonadRefWriter m, Monad n)
@@ -292,26 +264,25 @@ toSend li rb b0 c0 fb = do
     tell' (act, mempty)
     return $ readRef $ (_1 . _2 . _2) `lensMap` memoref
 
-----------------
+------------------------
 
--- Ref-based WriterT
-type RefWriterT w m = ReaderT (Ref m w) m
+instance MonadRegisterRun (Register (Prog TP)) where
 
-runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)
-runRefWriterT m = do
-    r <- newRef mempty
-    a <- runReaderT m r
-    return (a, r)
+    type AsocT (Register (Prog TP)) = TP
 
-tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
-tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
+    runReg r w m = runRegister_ (liftM unTP r) (w . TP) m
 
--------------
+newtype TP = TP { unTP :: SLSt (Prog TP) () }
 
-newtype MonadMonoid a = MonadMonoid { runMonadMonoid :: a () }
+runTests = do
+    mkTests runTestSimple
+    tests runTest
 
-instance Monad m => Monoid (MonadMonoid m) where
-    mempty = MonadMonoid $ return ()
-    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ a >> b
+runTest :: (Eq a, Show a) => Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
+runTest = runTest_ (TP . lift) runReg
+
+runTestSimple :: Register (Prog TP) () -> IO ()
+runTestSimple m = runTest m $ return ((), return ())
+
 
 

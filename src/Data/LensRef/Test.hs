@@ -4,126 +4,33 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 -- | Tests for the @MonadRefCreator@ interface.
 module Data.LensRef.Test
     ( -- * Tests for the interface
       mkTests
-    -- * Tests for implementations
-    , testPure
---    , testFast
+    , tests
     ) where
 
-import Control.Monad.State
-import Control.Monad.Writer
-import Control.Monad.Trans.Control
-import Control.Concurrent
-import Control.Category
-import Control.Arrow ((***))
 import Data.Maybe
-import Prelude hiding ((.), id)
-import System.IO
-
+import Control.Monad.State
+import Control.Arrow ((***))
 import Control.Lens
-import Data.LensRef
-import qualified Data.LensRef.Pure as Pure
-import qualified Data.LensRef.Fast as Fast
 
-import System.IO.Unsafe
+import Data.LensRef
+import Data.LensRef.TestEnv
 
 -----------------------------------------------------------------
-
-
-instance (MonadRefCreator m, Monoid w) => MonadRefReader (WriterT w m) where
-
-    type BaseRef (WriterT w m) = BaseRef m
-
-    liftRefReader = lift . liftRefReader
-
-
--- | This instance is used in the implementation, end users do not need it.
-instance (MonadRefCreator m, Monoid w) => MonadRefCreator (WriterT w m) where
-
-    extRef x y a = lift $ extRef x y a
-
-instance (MonadRefCreator m, MonadRefWriter m, Monoid w) => MonadRefWriter (WriterT w m) where
-
-    liftRefWriter = lift . liftRefWriter
-
-instance (MonadRefCreator m, Monoid w) => MonadMemo (WriterT w m) where
-
-    memoRead m = liftM restoreT $ liftWith $ \unlift -> memoRead $ unlift m
-
-{-
--- | Consistency tests for the pure implementation of @Ext@, should give an empty list of errors.
-testExtRegister :: [String]
-testExtRegister = mkTests $ \t -> let
-    (((), m), w) = runWriter $ Pure.runRegister newChan t
-    in w -- ++ execWriter m
-  where
-    newChan = return (fail "x", \_ -> return (error "1"))
--}
-
-instance MonadWriter [String] IO where
-    listen = undefined
-    pass = undefined
-    tell = putStrLn . show
-
-testPure = do
-    hSetBuffering stdout LineBuffering
-    w <- execWriterT $ mkTests $ \t -> do
-        ((), m) <- Pure.runRegister newChan' t
---        _ <- forkIO m   -- TODO
-        return ()
-    return w
-
-type IO' = WriterT [String] IO
-
-newChan' :: IO' (IO' a, a -> IO' ())
-newChan' = undefined {-do       -- TODO
-    ch <- newChan
-    return (readChan ch, \x -> writeChan ch x)
--}
-{-
-testFast = mkTests $ \t -> unsafePerformIO $ do
-    hSetBuffering stdout LineBuffering
-    ((), m) <- Fast.runRegister newChan' t
-
-    _ <- forkIO m
-    return ["end"]
-   where
-    newChan' :: IO (IO a, a -> IO ())
-    newChan' = do
-        ch <- newChan
-        return (readChan ch, \x -> writeChan ch x)
--}
-
--- | Check an equality.
-(==?) :: (Eq a, Show a, MonadWriter [String] (EffectM m), MonadRegister m) => a -> a -> m ()
-rv ==? v = liftEffectM $ when (rv /= v) $ tell . return $ "runTest failed: " ++ show rv ++ " /= " ++ show v
-
--- | Check the current value of a given reference.
-(==>) :: (Eq a, Show a, MonadWriter [String] (EffectM m), MonadRegister m) => Ref m a -> a -> m ()
-r ==> v = readRef r >>= (==? v)
-
-infix 0 ==>, ==?
-
-maybeLens :: Lens' (Bool, a) (Maybe a)
-maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
-              (\(_,a) x -> maybe (False, a) (\a' -> (True, a')) x)
-
-writeRef' = writeRef
 
 {- | 
 @mkTests@ generates a list of error messages which should be emtpy.
 
 Look inside the sources for the tests.
 -}
-mkTests
-    :: (MonadWriter [String] (EffectM m), MonadRegister m, MonadRefWriter m)
-    => (m () -> EffectM m ())
-    -> EffectM m ()
+mkTests :: (MonadRegisterRun m, MonadRefWriter m, EffectM m ~ Prog (AsocT m), Monad n)
+    => (m () -> n ())
+    -> n ()
+
 mkTests runTest = do
     newRefTest
     writeRefsTest
@@ -180,7 +87,7 @@ mkTests runTest = do
         r1 <- newRef 3
         rr <- newRef r1
         r1 ==> 3
-        let r = join' rr
+        let r = join $ readRef rr
         r ==> 3
         writeRef r1 4
         r ==> 4
@@ -196,7 +103,7 @@ mkTests runTest = do
         rr <- newRef r1
         r2 <- newRef 5
         writeRef rr r2
-        join' rr ==> 5
+        join (readRef rr) ==> 5
 
     chainTest0 = runTest $ do
         r <- newRef (1 :: Int)
@@ -364,54 +271,12 @@ mkTests runTest = do
         push m = m >>= \x -> maybe (return ()) liftRefWriter x
         m === t = m >>= \x -> isJust x ==? t
 
-{-
-    onchange x $ \b -> case b of
-        True -> do
-               ...
-               cb <- register ...
-               ...
+--------------------------
 
-  runTest :: Register _ _ () ->  TestM () -> Maybe Error
+maybeLens :: Lens' (Bool, a) (Maybe a)
+maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
+              (\(_,a) x -> maybe (False, a) (\a' -> (True, a')) x)
 
--}
-
-
-    writeRefTest = runTest $ do
-        r <- newRef (3 :: Int)
-        k <- newRef (3 :: Int)
-        sr <- registerCallback (writeRef' r) (const $ return ())
-        sk <- registerCallback (writeRef' k) (const $ return ())
-
-        _ <- onChange (readRef r) $ \x -> do
-            when (x == 3) $ do
-                _ <- onChange (readRef k) $ \x -> do
-                    liftEffectM $ tell ["k1: " ++ show x]
-                    return $ return ()
-                return ()
-            return $ do
-                liftEffectM $ tell ["r: " ++ show x]
-                when (x == 4) $ do
-                    _ <- onChange (readRef k) $ \x -> return $ do
-                        liftEffectM $ tell ["k2: " ++ show x]
-                    return ()
-                r ==> x
-        r ==> 3
-        liftEffectM $ sr 5
-        liftEffectM $ sk 6
-        liftEffectM $ sr 4
-        liftEffectM $ sk 7
-        liftEffectM $ sr 3
-        liftEffectM $ sk 8
-        liftEffectM $ sr 5
-        liftEffectM $ sk 9
-        liftEffectM $ sr 4
-        liftEffectM $ sk 10
-        liftEffectM $ sr 3
-        liftEffectM $ sk 11
-        r ==> 3
-        return ()
-
-    join' r = join $ readRef r
 
 -- | Undo-redo state transformation.
 undoTr
@@ -437,5 +302,142 @@ undoLens eq = lens get set where
     get = head . fst
     set (x' : xs, ys) x | eq x x' = (x: xs, ys)
     set (xs, _) x = (x : xs, [])
+
+
+----------------------------------------------------------------------------
+
+tests :: (MonadRegisterRun m, EffectM m ~ Prog (AsocT m), Monad n)
+    => (forall a . (Eq a, Show a) => m a -> Prog' (a, Prog' ()) -> n ())
+    -> n ()
+tests runTest = do
+    test0
+    test1
+    test2
+    test3
+    test4
+    extRefTest
+  where
+
+    extRefTest = runTest (do
+        r <- newRef $ Just (3 :: Int)
+        q <- extRef r maybeLens (False, 0)
+        let q1 = _1 `lensMap` q
+            q2 = _2 `lensMap` q
+        _ <- onChange (readRef r) $ \r -> return $ message $ show r
+        _ <- onChange (readRef q) $ \r -> return $ message $ show r
+        iReallyWantToModify $ writeRef r Nothing
+        iReallyWantToModify $ writeRef q1 True
+        iReallyWantToModify $ writeRef q2 1
+        ) $ do
+        message' "Just 3"
+        message' "(True,3)"
+        return $ (,) () $ do
+            message' "Nothing"
+            message' "(False,3)"
+            message' "Just 3"
+            message' "(True,3)"
+            message' "Just 1"
+            message' "(True,1)"
+            return ()
+
+    maybeLens :: Lens' (Bool, a) (Maybe a)
+    maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
+              (\(_,a) x -> maybe (False, a) (\a' -> (True, a')) x)
+
+
+    test0 = runTest (return ()) $ do
+        return ((), return ())
+
+    test1 = runTest (message "Hello") $ do
+        message' "Hello"
+        return ((), return ())
+
+    test2 = runTest (listen 1 $ \s -> liftModifier $ message $ "Hello " ++ s) $ do
+        message' "listener #0"
+        return $ (,) () $ do
+            send 1 "d"
+            message' "Hello d"
+            send 1 "f"
+            message' "Hello f"
+    --                send 2 "f"
+
+    test3 = runTest (do
+        listen 1 $ \s -> liftModifier $ message $ "Hello " ++ s
+        listen 2 $ \s -> liftModifier $ message $ "Hi " ++ s
+        listen 3 $ \s -> liftModifier $ do
+            message $ "H_ " ++ s
+            listen 4 $ \s' -> liftModifier $ 
+                message $ "H " ++ s'
+      ) $ do
+        message' "listener #0"
+        message' "listener #1"
+        message' "listener #2"
+        return $ (,) () $ do
+            send 1 "d"
+            message' "Hello d"
+            send 1 "f"
+            message' "Hello f"
+            send 2 "f"
+            message' "Hi f"
+            send 3 "f"
+            message' "H_ f"
+            message' "listener #3"
+            send 4 "f"
+            message' "H f"
+
+    test4 = runTest (do
+        r <- newRef (0 :: Int)
+        _ <- onChange (readRef r) $ \i -> case i of
+            0 -> return $ do
+                listen 1 $ \s -> do
+                    when (s == "f") $ do
+                        writeRef r 1
+                        rv <- readRef r
+                        liftModifier $ message $ show rv
+                    liftModifier $ message $ "Hello " ++ s
+--                    liftModifier $ message $ "Hello " ++ s
+
+            1 -> do
+                listen 2 $ \s -> do
+                    when (s == "g") $ writeRef r 0
+                    liftModifier $ message $ "Hi " ++ s
+                return $ return ()
+
+        return ()
+              ) $ do
+        -- TODO: fix this
+        message' "listener #0"
+        return $ (,) () $ do
+--            send 1 "d"
+--            message' "Hello d"
+--            send 1 "e"
+--            message' "Hello e"
+            send 1 "f"
+            message' "1"
+            message' "Hello f"
+            message' "Kill #0"
+            message' "listener #1"
+            send 1 "f"
+            error' "message is not received: 1 \"f\""
+            message' "1"
+            message' "Hello f"
+            send 1 "f"
+            error' "message is not received: 1 \"f\""
+            send 2 "f"
+            message' "Hi f"
+            send 2 "g"
+            message' "Hi g"
+            message' "listener #2"
+            send 2 "g"
+            error' "message is not received: 2 \"g\""
+            send 3 "f"
+            error' "message is not received: 3 \"f\""
+            send 1 "f"
+            message' "Hello f"
+            message' "Kill #2"
+            send 2 "f"
+            message' "Hi f"
+
+--------------------------------------------
 
 
