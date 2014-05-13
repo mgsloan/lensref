@@ -306,7 +306,7 @@ undoLens eq = lens get set where
 
 ----------------------------------------------------------------------------
 
-tests :: (MonadRegisterRun m, EffectM m ~ Prog (AsocT m), Monad n)
+tests :: (MonadRegisterRun m, EffectM m ~ Prog (AsocT m), Monad n, MonadRegister (Modifier m))
     => (forall a . (Eq a, Show a) => m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()
 tests runTest = do
@@ -352,7 +352,7 @@ tests runTest = do
         message' "Hello"
         return ((), return ())
 
-    test2 = runTest (listen 1 $ \s -> liftModifier $ message $ "Hello " ++ s) $ do
+    test2 = runTest (listen 1 $ \s -> message $ "Hello " ++ s) $ do
         message' "listener #0"
         return $ (,) () $ do
             send 1 "d"
@@ -362,11 +362,11 @@ tests runTest = do
     --                send 2 "f"
 
     test3 = runTest (do
-        listen 1 $ \s -> liftModifier $ message $ "Hello " ++ s
-        listen 2 $ \s -> liftModifier $ message $ "Hi " ++ s
-        listen 3 $ \s -> liftModifier $ do
+        listen 1 $ \s -> message $ "Hello " ++ s
+        listen 2 $ \s -> message $ "Hi " ++ s
+        listen 3 $ \s -> do
             message $ "H_ " ++ s
-            listen 4 $ \s' -> liftModifier $ 
+            listen 4 $ \s' ->
                 message $ "H " ++ s'
       ) $ do
         message' "listener #0"
@@ -393,13 +393,13 @@ tests runTest = do
                     when (s == "f") $ do
                         writeRef r 1
                         rv <- readRef r
-                        liftModifier $ message $ show rv
-                    liftModifier $ message $ "Hello " ++ s
+                        message $ show rv
+                    message $ "Hello " ++ s
 
             1 -> do
                 listen 2 $ \s -> do
                     when (s == "g") $ writeRef r 0
-                    liftModifier $ message $ "Hi " ++ s
+                    message $ "Hi " ++ s
                 return $ return ()
 
         return ()

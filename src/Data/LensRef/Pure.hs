@@ -159,40 +159,18 @@ instance Monad n => MonadRegister (Register n) where
 
     liftEffectM = lift
 
-    newtype Modifier (Register n) a = RegW {unRegW :: Register n a} deriving (Monad, Applicative, Functor)
+    type Modifier (Register n) = Register n
 
-    liftModifier = RegW
+    liftModifier = id
 
     onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
         toSend lift r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
 
     registerCallback f = Register $ ReaderT $ \ff -> do
         writerstate <- ask
-        return $ fmap (ff . flip runReaderT writerstate . evalRegister ff . unRegW) f
+        return $ fmap (ff . flip runReaderT writerstate . evalRegister ff) f
 
     getRegionStatus g = Register $ ReaderT $ const $ tell' (mempty, MonadMonoid . g)
-
-instance Monad m => MonadRefWriter (Modifier (Register m)) where
-    liftRefWriter = RegW . liftRefWriter
-
-instance Monad m => MonadRefReader (Modifier (Register m)) where
-
-    type BaseRef (Modifier (Register m)) = Lens_ LSt
-
-    liftRefReader = RegW . liftRefReader
-
-instance Monad m => MonadRefCreator (Modifier (Register m)) where
-    extRef r l = RegW . extRef r l
-    newRef = RegW . newRef
-
-instance Monad m => MonadMemo (Modifier (Register m)) where
-    memoRead = memoRead_
-{-
-    memoWrite = memoWrite_
-    future = future_
--}
-instance MonadFix m => MonadFix (Modifier (Register m)) where
-    mfix f = RegW $ mfix $ unRegW . f
 
 
 evalRegister ff (Register m) = runReaderT m ff

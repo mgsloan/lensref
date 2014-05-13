@@ -65,6 +65,7 @@ type Prog t = ProgramT (Inst t) (State (Seq.Seq Any))
 instance NewRef (Prog t) where
     newRef' = singleton . NewRef
 
+message :: (MonadRegister m, EffectM m ~ Prog t) => String -> m ()
 message = liftEffectM . singleton . Message
 
 listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> Modifier m ()) -> m ()

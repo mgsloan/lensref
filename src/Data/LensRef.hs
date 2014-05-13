@@ -231,7 +231,9 @@ class Monad m => MonadMemo m where
 -}
 
 -- | Monad for dynamic actions
-class (MonadRefCreator m, Monad (EffectM m), MonadRefWriter (Modifier m), MonadRefCreator (Modifier m), BaseRef (Modifier m) ~ BaseRef m) => MonadRegister m where
+class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier m), BaseRef (Modifier m) ~ BaseRef m, Monad (EffectM m),
+    {- MonadRegister (Modifier m), -}EffectM (Modifier m) ~ EffectM m, Modifier (Modifier m) ~ Modifier m)
+    => MonadRegister m where
 
     type EffectM m :: * -> *
 
@@ -280,7 +282,7 @@ class (MonadRefCreator m, Monad (EffectM m), MonadRefWriter (Modifier m), MonadR
     onChangeSimple :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
     onChangeSimple r f = onChange r $ return . f
 
-    data Modifier m a :: *
+    type Modifier m :: * -> *
 
     -- liftToModifier
     liftModifier :: m a -> Modifier m a
