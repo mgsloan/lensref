@@ -30,7 +30,7 @@ module Data.LensRef
 
     -- * Derived constructs
     , modRef
-    , iReallyWantToModify
+    , postponeModification
 --    , undoTr
 
     , EqRefClass (..)
@@ -300,8 +300,8 @@ data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 -------------- derived constructs
 
 -- | TODO
-iReallyWantToModify :: MonadRegister m => Modifier m () -> m ()
-iReallyWantToModify = liftEffectM . runIdentity <=< registerCallback . Identity
+postponeModification :: MonadRegister m => Modifier m () -> m ()
+postponeModification = liftEffectM . runIdentity <=< registerCallback . Identity
 
 
 -- | @modRef r f@ === @readRef r >>= writeRef r . f@

@@ -325,9 +325,9 @@ tests runTest = do
             q2 = _2 `lensMap` q
         _ <- onChange (readRef r) $ \r -> return $ message $ show r
         _ <- onChange (readRef q) $ \r -> return $ message $ show r
-        iReallyWantToModify $ writeRef r Nothing
-        iReallyWantToModify $ writeRef q1 True
-        iReallyWantToModify $ writeRef q2 1
+        postponeModification $ writeRef r Nothing
+        postponeModification $ writeRef q1 True
+        postponeModification $ writeRef q2 1
         ) $ do
         message' "Just 3"
         message' "(True,3)"
