@@ -8,14 +8,15 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_HADDOCK hide #-}
 module Data.LensRef.TestEnv where
 
 import Control.Monad.State
-import Control.Monad.Writer hiding (listen)
-import Control.Monad.Operational hiding (view)
+import Control.Monad.Writer hiding (listen, Any)
+import Control.Monad.Operational
 import qualified Data.Sequence as Seq
-import Control.Lens hiding ((|>))
+import Control.Lens hiding ((|>), view)
 
 import Unsafe.Coerce
 
@@ -56,7 +57,7 @@ data Inst t a where
     WriteI :: t -> Inst t ()
     NewRef :: a -> Inst t (Morph (StateT a (Prog t)) (Prog t))
 
-type Prog t = ProgramT (Inst t) (State (Seq.Seq Anny))
+type Prog t = ProgramT (Inst t) (State (Seq.Seq Any))
 
 
 ---------------------------------------------------
@@ -115,103 +116,122 @@ showRes ((),l) = f [] l where
     f acc (Left e: _) = reverse $ either id id e: acc
     f _ [] = []
 
-type ST m = ([m], Listeners m, Int, Seq.Seq Anny)
-
-data Anny = forall x . Anny x
+data Any = forall x . Any x
 
 data Listener m = forall a . Show a => Listener
-    { listenerId :: Id
-    , listenerPort :: Port a
-    , listenerStatus :: RegisteredCallbackCommand
-    , listenerCallback :: a -> Prog m ()
+    { _listenerId :: Id
+    , _listenerPort :: Port a
+    , _listenerStatus :: RegisteredCallbackCommand
+    , _listenerCallback :: a -> Prog m ()
     }
-type Listeners m = [Listener m]
+makeLenses ''Listener
+
+data ST m = ST
+    { _postponed :: [m]
+    , _listeners :: [Listener m]
+    , _idcounter :: Int
+    , _vars :: Seq.Seq Any
+    }
+makeLenses ''ST
 
 
 coeval_ :: forall a b m
      . (Prog m () -> m)
     -> Prog m a -> Prog' b
-    -> StateT (ST m) Er (a, Prog' b)
-coeval_ lift = coeval where
- coeval q p = do
-  (xx,li,co,vars_) <- get
-  let (op, vars) = flip runState vars_ $ viewT $ q
-  case ( op
-      , runIdentity . viewT $ p) of
+    -> StateT (ST m) Er (Maybe a, Prog' b)
+coeval_ lift_ q p = do
+    op <- zoom vars $ mapStateT lift $ viewT q
+    coeval__ lift_ op p
+
+coeval__ :: forall a b m
+     . (Prog m () -> m)
+    -> ProgramViewT (Inst m) (State (Seq.Seq Any)) a -> Prog' b
+    -> StateT (ST m) Er (Maybe a, Prog' b)
+coeval__ lift_ op p = do
+  nopostponed <- use $ postponed . to null
+  case (op, view p) of
+
     (_, Error' s :>>= k) -> do
         unfail s
-        coeval q (k ())
+        coeval__ lift_ op $ k ()
+
     (Message s :>>= k, Return x) -> do
         fail' $ "the following message expected: " ++ s ++ " instead of return"
-        coeval (k ()) (return x)
+        coeval_ lift_ (k ()) (return x)
+
     (Message s :>>= k, Message' s' :>>= k')
-        | s == s' -> tell_ ("message: " ++ s) >> coeval (k ()) (k' ())
+        | s == s' -> do
+            tell_ ("message: " ++ s)
+            coeval_ lift_ (k ()) (k' ())
         | otherwise -> do
             fail' $ "the following message expected: " ++ s ++ " instead of " ++ s'
-            coeval q (k' ())
+            coeval__ lift_ op $ k' ()
+
     (Message s :>>= _, Send _i s' :>>= k') -> do
         fail' $ "the following message expected: " ++ s ++ " instead of send " ++ show s'
-        coeval q (k' ())
-    (SetStatus i Kill :>>= k, _) -> do
-        let li' = filter ((/=i) . listenerId) li
-        if length li' == length li
-          then fail' "cant kill"
-          else put (xx,li',co,vars)
-        coeval (k ()) p
-    (SetStatus i Block :>>= k, _) -> do
-        let f (Listener i' c Unblock x) | i' == i = Listener i c Block x
-            f x = x
-        put (xx, map f li,co,vars)
-        coeval (k ()) p
-    (SetStatus i Unblock :>>= k, _) -> do
-        let f (Listener i' c Block x) | i' == i = Listener i c Unblock x
-            f x = x
-        put (xx, map f li,co,vars)
-        coeval (k ()) p
+        coeval__ lift_ op (k' ())
+
+    (SetStatus i status :>>= k, _) -> do
+        listeners %= case status of
+            Kill -> filter ((/=i) . (^. listenerId))
+            Block -> map f where
+                f (Listener i' c Unblock x) | i' == i = Listener i c Block x
+                f x = x
+            Unblock -> map f where
+                f (Listener i' c Block x) | i' == i = Listener i c Unblock x
+                f x = x
+        coeval_ lift_ (k ()) p
+
     (Listen i lr :>>= k, _) -> do
-        put (xx, Listener (Id co) i Unblock lr: li, co + 1,vars)
-        coeval (k $ Id co) p
-    (ReadI :>>= k, _) | not $ null xx -> do
-        let (q:qu) = xx
-        put (qu, li, co,vars)
-        coeval (k q) p
+        co <- use idcounter
+        listeners %= (Listener (Id co) i Unblock lr :)
+        idcounter %= (+1)
+        coeval_ lift_ (k $ Id co) p
+
+    (ReadI :>>= k, _) | not nopostponed -> do
+        x <- use $ postponed . to head
+        postponed %= tail
+        coeval_ lift_ (k x) p
+
     (WriteI x :>>= k, _) -> do
-        put (xx ++[x], li, co,vars)
-        coeval (k ()) p
+        postponed %= (++[x])
+        coeval_ lift_ (k ()) p
 
     (NewRef a :>>= k, _) -> do
-        let n = Seq.length vars
-            gg = Morph $ ff a
-            ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
+        n <- use $ vars . to Seq.length
+
+        let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
             ff _ (StateT f) = do
                 vars <- get
                 let (v1, v2_) = Seq.splitAt n vars
                     (v Seq.:< v2) = Seq.viewl v2_
                 case v of
-                    Anny w -> do
+                    Any w -> do
                       rr <- f $ unsafeCoerce w
                       case rr of
                         (x, w') -> do
-                            put $ v1 Seq.>< (Anny w' Seq.<| v2)
+                            put $ v1 Seq.>< (Any w' Seq.<| v2)
                             return x
-        put (xx, li, co,vars Seq.|> Anny a)
-        coeval (k gg) p
+        vars %= (Seq.|> Any a)
+        coeval_ lift_ (k $ Morph $ ff a) p
 
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s
-        if (not $ null xx)
+        if not nopostponed
           then do
             fail' $ "early send of " ++ show s
           else do
-            let li' = [lift $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi']
+            li' <- use $ listeners . to (\li -> [lift_ $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
             if (null li')
               then do
                 fail' $ "message is not received: " ++ show i ++ " " ++ show s
               else do
-                put (xx ++ li', li, co,vars) --modify (`mappend` (li,[]))
-        coeval q (k ())
-    (ReadI :>>= _, _) | null xx -> return (undefined, p)
-    (Return x, _) -> return (x, p)
+                postponed %= (++ li')
+        coeval__ lift_ op (k ())
+
+    (ReadI :>>= _, _) | nopostponed -> return (Nothing, p)
+
+    (Return x, _) -> return (Just x, p)
 
 
 
@@ -221,9 +241,8 @@ runTest_ :: (Eq a, Show a, m ~ Prog n)
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ lift runRegister_ r p0 = putStrLn $ unlines $ handEr $ flip evalStateT ([], [], 0, Seq.empty) $ do
-    let    m = runRegister_ (singleton ReadI) (singleton . WriteI) r
-    ((a1,c),pe) <- coeval_ lift m p0
+runTest_ lift runRegister_ r p0 = putStrLn $ unlines $ handEr $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
+    (Just (a1,c),pe) <- coeval_ lift (runRegister_ (singleton ReadI) (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
     (_, pr) <- coeval_ lift c p

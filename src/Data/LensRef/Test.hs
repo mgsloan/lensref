@@ -395,7 +395,6 @@ tests runTest = do
                         rv <- readRef r
                         liftModifier $ message $ show rv
                     liftModifier $ message $ "Hello " ++ s
---                    liftModifier $ message $ "Hello " ++ s
 
             1 -> do
                 listen 2 $ \s -> do
@@ -405,22 +404,16 @@ tests runTest = do
 
         return ()
               ) $ do
-        -- TODO: fix this
+
         message' "listener #0"
         return $ (,) () $ do
---            send 1 "d"
---            message' "Hello d"
---            send 1 "e"
---            message' "Hello e"
+            send 1 "d"
+            message' "Hello d"
             send 1 "f"
             message' "1"
             message' "Hello f"
             message' "Kill #0"
             message' "listener #1"
-            send 1 "f"
-            error' "message is not received: 1 \"f\""
-            message' "1"
-            message' "Hello f"
             send 1 "f"
             error' "message is not received: 1 \"f\""
             send 2 "f"
@@ -433,11 +426,11 @@ tests runTest = do
             send 3 "f"
             error' "message is not received: 3 \"f\""
             send 1 "f"
+            message' "1"
             message' "Hello f"
             message' "Kill #2"
             send 2 "f"
             message' "Hi f"
 
---------------------------------------------
 
 
