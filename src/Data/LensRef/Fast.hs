@@ -154,7 +154,7 @@ instance NewRef m => MonadRefWriter (Wrap m) where
 
 ---------------------------------
 
-type Register_ n m = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
+type Register_ n m = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid n)) m
 
 newtype Reg n a = Reg { unReg :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a } deriving (Monad, Applicative, Functor)
 
@@ -200,7 +200,7 @@ instance NewRef m => MonadRegister (Register m) where
 
     liftEffectM = Reg . lift . lift . lift
 
-    liftModifier = id
+    liftToModifier = id
 
     onChangeAcc r b0 c0 f = Reg $ ReaderT $ \ff ->
         toSend True id r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
@@ -212,7 +212,7 @@ instance NewRef m => MonadRegister (Register m) where
         writerstate <- ask
         return $ fmap (unWrap . ff . flip runReaderT writerstate . evalRegister ff) f
 
-    getRegionStatus g = Reg $ ReaderT $ const $
+    onRegionStatusChange g = Reg $ ReaderT $ const $
         tell' (mempty, MonadMonoid . Wrap . g)
 
 

@@ -116,7 +116,7 @@ instance Monad m => MonadRefWriter (StateT LSt m) where
 
 
 type Register_ n m
-    = ReaderT (Ref m (MonadMonoid m, RegisteredCallbackCommand -> MonadMonoid n)) m
+    = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid n)) m
 
 newtype Register n a
     = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a }
@@ -161,7 +161,7 @@ instance Monad n => MonadRegister (Register n) where
 
     type Modifier (Register n) = Register n
 
-    liftModifier = id
+    liftToModifier = id
 
     onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
         toSend lift r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
@@ -170,7 +170,7 @@ instance Monad n => MonadRegister (Register n) where
         writerstate <- ask
         return $ fmap (ff . flip runReaderT writerstate . evalRegister ff) f
 
-    getRegionStatus g = Register $ ReaderT $ const $ tell' (mempty, MonadMonoid . g)
+    onRegionStatusChange g = Register $ ReaderT $ const $ tell' (mempty, MonadMonoid . g)
 
 
 evalRegister ff (Register m) = runReaderT m ff

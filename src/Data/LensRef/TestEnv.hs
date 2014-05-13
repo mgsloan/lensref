@@ -51,7 +51,7 @@ instance Show (Port a) where show (Port i) = show i
 data Inst t a where
     Message  :: String -> Inst t ()
     Listen   :: Show b => Port b -> (b -> Prog t ()) -> Inst t Id
-    SetStatus  :: Id -> RegisteredCallbackCommand -> Inst t ()
+    SetStatus  :: Id -> RegionStatusChange -> Inst t ()
 
     ReadI :: Inst t t
     WriteI :: t -> Inst t ()
@@ -73,7 +73,7 @@ listen i m = do
     f <- registerCallback m
     id <- liftEffectM . singleton $ Listen i f
     message $ "listener " ++ show id
-    getRegionStatus $ \s -> do
+    onRegionStatusChange $ \s -> do
         singleton $ SetStatus id s
         when (s == Kill) $ singleton $ Message $ show s ++ " " ++ show id
 
@@ -122,7 +122,7 @@ data Any = forall x . Any x
 data Listener m = forall a . Show a => Listener
     { _listenerId :: Id
     , _listenerPort :: Port a
-    , _listenerStatus :: RegisteredCallbackCommand
+    , _listenerStatus :: RegionStatusChange
     , _listenerCallback :: a -> Prog m ()
     }
 makeLenses ''Listener

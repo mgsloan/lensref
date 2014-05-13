@@ -23,7 +23,7 @@ module Data.LensRef
 
     -- ** Dynamic networks
     , MonadRegister (..)
-    , RegisteredCallbackCommand (..)
+    , RegionStatusChange (..)
 
     -- ** Other
     , MonadMemo (..)
@@ -284,28 +284,20 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
 
     type Modifier m :: * -> *
 
-    -- liftToModifier
-    liftModifier :: m a -> Modifier m a
+    liftToModifier :: m a -> Modifier m a
 
     registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
 
-    -- onRegionStatusChange
-    getRegionStatus :: (RegisteredCallbackCommand -> EffectM m ()) -> m ()
+    onRegionStatusChange :: (RegionStatusChange -> EffectM m ()) -> m ()
 
--- | TODO   -- RegionStatusChange
-data RegisteredCallbackCommand = Kill | Block | Unblock deriving (Eq, Ord, Show)
+-- | TODO
+data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 
 
 
 
 -------------- derived constructs
-
-{-
--- | TODO
-registerCallbackSimple :: MonadRegister m => Modifier m () -> m (EffectM m ())
-registerCallbackSimple = liftM runIdentity . registerCallback . Identity
--}
 
 -- | TODO
 iReallyWantToModify :: MonadRegister m => Modifier m () -> m ()
