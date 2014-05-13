@@ -30,8 +30,6 @@ module Data.LensRef
 
     -- * Derived constructs
     , modRef
-    , registerCallbackSimple
-    , onChangeEffect
     , iReallyWantToModify
 --    , undoTr
 
@@ -51,6 +49,7 @@ module Data.LensRef
 
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Lens (Lens', lens, set)
 
 --------------------------------
@@ -300,18 +299,15 @@ data RegisteredCallbackCommand = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 -------------- derived constructs
 
-
+{-
 -- | TODO
 registerCallbackSimple :: MonadRegister m => Modifier m () -> m (EffectM m ())
-registerCallbackSimple = liftM ($ ()) . registerCallback . const
-
--- | TODO
-onChangeEffect  :: (MonadRegister m, Eq a) => RefReader m a -> (a -> EffectM m b) -> m (RefReader m b)
-onChangeEffect r f = onChangeSimple r $ liftEffectM . f
+registerCallbackSimple = liftM runIdentity . registerCallback . Identity
+-}
 
 -- | TODO
 iReallyWantToModify :: MonadRegister m => Modifier m () -> m ()
-iReallyWantToModify = liftEffectM <=< registerCallbackSimple
+iReallyWantToModify = liftEffectM . runIdentity <=< registerCallback . Identity
 
 
 -- | @modRef r f@ === @readRef r >>= writeRef r . f@
