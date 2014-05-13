@@ -235,10 +235,6 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
     {- MonadRegister (Modifier m), -}EffectM (Modifier m) ~ EffectM m, Modifier (Modifier m) ~ Modifier m)
     => MonadRegister m where
 
-    type EffectM m :: * -> *
-
-    liftEffectM :: EffectM m a -> m a
-
     {- |
     Let @r@ be an effectless action (@RefReader@ guarantees this).
 
@@ -282,13 +278,18 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
     onChangeSimple :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
     onChangeSimple r f = onChange r $ return . f
 
+    onRegionStatusChange :: (RegionStatusChange -> m ()) -> m ()
+
+    type EffectM m :: * -> *
+
+    liftEffectM :: EffectM m a -> m a
+
     type Modifier m :: * -> *
 
     liftToModifier :: m a -> Modifier m a
 
     registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
 
-    onRegionStatusChange :: (RegionStatusChange -> EffectM m ()) -> m ()
 
 -- | TODO
 data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)

@@ -115,11 +115,11 @@ instance Monad m => MonadRefWriter (StateT LSt m) where
 ---------------------------------
 
 
-type Register_ n m
-    = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid n)) m
+type Register_ m
+    = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid m)) m
 
 newtype Register n a
-    = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ n (SLSt n)) a }
+    = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ (SLSt n)) a }
         deriving (Monad, Applicative, Functor)
 
 type SLSt = StateT LSt
@@ -164,14 +164,15 @@ instance Monad n => MonadRegister (Register n) where
     liftToModifier = id
 
     onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
-        toSend lift r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
+        toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
 
     registerCallback f = Register $ ReaderT $ \ff -> do
         writerstate <- ask
         return $ fmap (ff . flip runReaderT writerstate . evalRegister ff) f
 
-    onRegionStatusChange g = Register $ ReaderT $ const $ tell' (mempty, MonadMonoid . g)
-
+    onRegionStatusChange g = Register $ ReaderT $ \ff -> do
+        writerstate <- ask
+        tell' (mempty, MonadMonoid . flip runReaderT writerstate . evalRegister ff . g)
 
 evalRegister ff (Register m) = runReaderT m ff
 
@@ -198,15 +199,14 @@ runRegister_ read write (Register m) = do
 ------------------------------------
 
 toSend
-    :: (Eq b, MonadRefCreator m, MonadRefWriter m, Monad n)
-    => (n () -> m ())
-    -> RefReader m b
+    :: (Eq b, MonadRefCreator m, MonadRefWriter m)
+    => RefReader m b
     -> b -> (b -> c)
-    -> (b -> b -> c -> {-Either (Register m c)-} Register_ n m (c -> Register_ n m c))
-    -> Register_ n m (RefReader m c)
-toSend li rb b0 c0 fb = do
+    -> (b -> b -> c -> {-Either (Register m c)-} Register_ m (c -> Register_ m c))
+    -> Register_ m (RefReader m c)
+toSend rb b0 c0 fb = do
     let doit st = readRef st >>= runMonadMonoid . fst
-        reg st msg = readRef st >>= li . runMonadMonoid . ($ msg) . snd
+        reg st msg = readRef st >>= runMonadMonoid . ($ msg) . snd
 
     memoref <- lift $ do
         b <- liftRefReader rb

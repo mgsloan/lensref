@@ -74,8 +74,8 @@ listen i m = do
     id <- liftEffectM . singleton $ Listen i f
     message $ "listener " ++ show id
     onRegionStatusChange $ \s -> do
-        singleton $ SetStatus id s
-        when (s == Kill) $ singleton $ Message $ show s ++ " " ++ show id
+        liftEffectM . singleton $ SetStatus id s
+        when (s == Kill) $ message $ show s ++ " " ++ show id
 
 
 data Inst' a where
