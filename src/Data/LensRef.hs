@@ -280,6 +280,7 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
 
     onRegionStatusChange :: (RegionStatusChange -> m ()) -> m ()
 
+
     type EffectM m :: * -> *
 
     liftEffectM :: EffectM m a -> m a
@@ -289,6 +290,10 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
     liftToModifier :: m a -> Modifier m a
 
     registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
+
+--    unliftEffectM :: Functor f => f (m ()) -> m (f (EffectM m ()))
+--    registerCallback_ :: Functor f => f (Modifier m ()) -> m (f (m ()))
+--    registerCallback = registerCallback_ >=> unliftEffectM
 
 
 -- | TODO

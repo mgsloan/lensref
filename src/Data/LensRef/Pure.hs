@@ -118,8 +118,11 @@ instance Monad m => MonadRefWriter (StateT LSt m) where
 type Register_ m
     = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid m)) m
 
+type RegRef m
+    = Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid m)
+
 newtype Register n a
-    = Register { unRegister :: ReaderT (SLSt n () -> n ()) (Register_ (SLSt n)) a }
+    = Register { unRegister :: ReaderT (SLSt n () -> n (), RegRef (SLSt n)) (SLSt n) a }
         deriving (Monad, Applicative, Functor)
 
 type SLSt = StateT LSt
@@ -129,7 +132,7 @@ mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s 
     ff $ flip runStateT s $ flip runReaderT (iso undefined undefined `lensMap` r) $ runReaderT m $ undefined f
 -}
 instance MonadTrans Register where
-    lift = Register . lift . lift . lift
+    lift = Register . lift . lift
 
 instance MonadFix m => MonadFix (Register m) where
     mfix f = Register $ mfix $ unRegister . f
@@ -138,11 +141,11 @@ instance Monad m => MonadRefReader (Register m) where
 
     type BaseRef (Register n) = Lens_ LSt
 
-    liftRefReader = Register . lift . lift . liftRefReader
+    liftRefReader = Register . lift . liftRefReader
 
 instance Monad n => MonadRefCreator (Register n) where
-    extRef r l = Register . lift . lift . extRef r l
-    newRef = Register . lift . lift . newRef
+    extRef r l = Register . lift . extRef r l
+    newRef = Register . lift . newRef
 
 instance Monad m => MonadMemo (Register m) where
     memoRead = memoRead_
@@ -151,7 +154,7 @@ instance Monad m => MonadMemo (Register m) where
     future = future_
 -}
 instance Monad n => MonadRefWriter (Register n) where
-    liftRefWriter = Register . lift . lift . liftRefWriter
+    liftRefWriter = Register . lift . liftRefWriter
 
 instance Monad n => MonadRegister (Register n) where
 
@@ -163,16 +166,19 @@ instance Monad n => MonadRegister (Register n) where
 
     liftToModifier = id
 
-    onChangeAcc r b0 c0 f = Register $ ReaderT $ \ff ->
-        toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
+    onChangeAcc r b0 c0 f = Register $ do
+        ff <- asks fst
+        magnify _2 $ toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister' ff . x) $ evalRegister' ff $ f b b' c'
 
-    registerCallback f = Register $ ReaderT $ \ff -> do
-        writerstate <- ask
-        return $ fmap (ff . flip runReaderT writerstate . evalRegister ff) f
+    registerCallback f = Register $ do
+        st <- ask
+        return $ fmap (fst st . evalRegister st) f
 
-    onRegionStatusChange g = Register $ ReaderT $ \ff -> do
-        writerstate <- ask
-        tell' (mempty, MonadMonoid . flip runReaderT writerstate . evalRegister ff . g)
+    onRegionStatusChange g = Register $ do
+        st <- ask
+        magnify _2 $ tell' (mempty, MonadMonoid . evalRegister st . g)
+
+evalRegister' ff (Register m) = ReaderT $ \s -> runReaderT m (ff, s)
 
 evalRegister ff (Register m) = runReaderT m ff
 
@@ -185,7 +191,8 @@ runRegister newChan (Register m) = do
 runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Register m) = do
     ((a, tick), s) <- flip runStateT initLSt $ do
-        (a, r) <- runRefWriterT $ runReaderT m write
+        r <- newRef mempty
+        a <- runReaderT m (write, r)
         (w, _) <- readRef r
         return (a, runMonadMonoid w)
     let eval s = do
