@@ -54,8 +54,8 @@ library
                     src
   build-depends:
                     base < 5
-                  , transformers == 0.3.*
-                  , mtl == 2.1.*
+                  , transformers >= 0.3 && < 0.5
+                  , mtl >= 2 && < 2.3
                   , monad-control == 0.3.*
                   , operational == 0.2.*
                   , lens == 4.1.*
