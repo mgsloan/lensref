@@ -110,8 +110,11 @@ type Er = Writer [Either (Either String String) String] --ErrorT String (Writer 
 tell_ s = tell [Right s]
 fail' s = tell [Left $ Right s]
 unfail s = tell [Left $ Left s]
-handEr = showRes . runWriter -- . runErrorT
-showRes ((),l) = f [] l where
+handEr name = showRes name . runWriter -- . runErrorT
+showRes name ((),l) = case f [] l of
+    [] -> []
+    xs -> ("test " ++ name ++ " failed.") : xs ++ [""]
+  where
     f acc (Right x: xs) = f (x:acc) xs
     f acc (Left (Right s): Left (Left s'): xs) | s == s' = f (("unfail " ++ s'): acc) xs
     f acc (Left e: _) = reverse $ either id id e: acc
@@ -138,7 +141,8 @@ makeLenses ''ST
 
 coeval_ :: forall a b m
      . (Prog m () -> m)
-    -> Prog m a -> Prog' b
+    -> Prog m a
+    -> Prog' b
     -> StateT (ST m) Er (Maybe a, Prog' b)
 coeval_ lift_ q p = do
     op <- zoom vars $ mapStateT lift $ viewT q
@@ -146,7 +150,8 @@ coeval_ lift_ q p = do
 
 coeval__ :: forall a b m
      . (Prog m () -> m)
-    -> ProgramViewT (Inst m) (State (Seq.Seq Any)) a -> Prog' b
+    -> ProgramViewT (Inst m) (State (Seq.Seq Any)) a
+    -> Prog' b
     -> StateT (ST m) Er (Maybe a, Prog' b)
 coeval__ lift_ op p = do
   nopostponed <- use $ postponed . to null
@@ -203,16 +208,13 @@ coeval__ lift_ op p = do
 
         let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
             ff _ (StateT f) = do
-                vars <- get
-                let (v1, v2_) = Seq.splitAt n vars
-                    (v Seq.:< v2) = Seq.viewl v2_
+                v <- gets (`Seq.index` n)
+                modify $ Seq.update n $ error "recursive reference modification"
                 case v of
-                    Any w -> do
-                      rr <- f $ unsafeCoerce w
-                      case rr of
-                        (x, w') -> do
-                            put $ v1 Seq.>< (Any w' Seq.<| v2)
-                            return x
+                  Any w -> do
+                    (x, w') <- f $ unsafeCoerce w
+                    modify $ Seq.update n $ Any w'
+                    return x
         vars %= (Seq.|> Any a)
         coeval_ lift_ (k $ Morph $ ff a) p
 
@@ -237,12 +239,13 @@ coeval__ lift_ op p = do
 
 
 runTest_ :: (Eq a, Show a, m ~ Prog n)
-    => (Prog n () -> n)
+    => String
+    -> (Prog n () -> n)
     -> (m n -> (n -> m ()) -> tm a -> m (a, m ()))
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ lift runRegister_ r p0 = putStrLn $ unlines $ handEr $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
+runTest_ name lift runRegister_ r p0 = putStr $ unlines $ handEr name $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
     (Just (a1,c),pe) <- coeval_ lift (runRegister_ (singleton ReadI) (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2

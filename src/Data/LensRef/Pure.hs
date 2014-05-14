@@ -183,9 +183,9 @@ evalRegister' ff (Register m) = ReaderT $ \s -> runReaderT m (ff, s)
 evalRegister ff (Register m) = runReaderT m ff
 
 runRegister :: Monad m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
-runRegister newChan (Register m) = do
+runRegister newChan m = do
     (read, write) <- newChan
-    runRegister_ read write (Register m)
+    runRegister_ read write m
 
 
 runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, m ())
@@ -195,12 +195,9 @@ runRegister_ read write (Register m) = do
         a <- runReaderT m (write, r)
         (w, _) <- readRef r
         return (a, runMonadMonoid w)
-    let eval s = do
-            m <- read
-            s <- flip execStateT s $ do
-                m
-                tick
-            eval s
+    let eval s = flip evalStateT s $ forever $ do
+            join $ lift read
+            tick
     return $ (,) a $ eval s
 
 ------------------------------------
@@ -263,11 +260,12 @@ runTests = do
     mkTests runTestSimple
     tests runTest
 
-runTest :: (Eq a, Show a) => Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest = runTest_ (TP . lift) runReg
+runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
+runTest name m p = do
+    runTest_ name (TP . lift) runReg m p
 
 runTestSimple :: Register (Prog TP) () -> IO ()
-runTestSimple m = runTest m $ return ((), return ())
+runTestSimple m = runTest "" m $ return ((), return ())
 
 
 

@@ -301,9 +301,9 @@ runTests = do
     tests runTest
 
 
-runTest :: (Eq a, Show a) => Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest = runTest_ (TP . lift) runReg
+runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
+runTest name = runTest_ name (TP . lift) runReg
 
 runTestSimple :: Register (Prog TP) () -> IO ()
-runTestSimple m = runTest m $ return ((), return ())
+runTestSimple m = runTest "" m $ return ((), return ())
 
