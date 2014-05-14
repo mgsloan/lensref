@@ -9,7 +9,6 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# OPTIONS_HADDOCK hide #-}
 module Data.LensRef.TestEnv where
 
 import Control.Monad.State

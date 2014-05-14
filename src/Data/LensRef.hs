@@ -50,7 +50,7 @@ module Data.LensRef
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Lens (Lens', lens, set)
+import Control.Lens (Lens', lens, set, united)
 
 --------------------------------
 
@@ -66,10 +66,6 @@ of just @(r a)@. For more compact type signatures, @(RefReaderSimple r (r a))@ i
 class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), RefReader (RefReaderSimple r) ~ RefReaderSimple r) => RefClass r where
 
     {- | unit reference
-
-    Laws:
-
-    prop> writeRef unitRef () >> m  =  m
     -}
     unitRef :: RefSimple r ()
 
@@ -77,7 +73,7 @@ class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), R
     -}
     lensMap :: Lens' a b -> RefSimple r a -> RefSimple r b
 
-    {- | Associated reader monad.
+    {- | Associated reference reader monad.
 
     @(RefReaderSimple m)@ is ismoroprhic to @('Reader' x)@ for some @x@.
     Laws which ensures this isomorphism (@(r :: RefReaderSimple m a)@ is arbitrary):
@@ -90,23 +86,12 @@ class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), R
     type RefReaderSimple r :: * -> *
 
     {- | Reference read.
-
-    Laws:
-
-    prop> readRef r >> return ())  =  return ()
     -}
     readRefSimple  :: RefSimple r a -> RefReaderSimple r a
 
     {- | Reference write.
-
-    Properties derived from the set-get, get-set and set-set laws for lenses:
-
-    prop> readRef r >>= writeRef r  =  return ()
-    prop> writeRef r a >> readRef r)  =  return a
-    prop> writeRef r a >> writeRef r a')  =  writeRef r a'
     -}
     writeRefSimple :: RefSimple r a -> a -> RefWriterSimple r ()
-
 
 data family RefWriterOf (m :: * -> *) a :: *
 
@@ -130,16 +115,9 @@ class Monad m => MonadRefReader m where
     -- | Base reference associated to the reference reader monad
     type BaseRef m :: * -> *
 
-    {- | @RefReader@ lifted to the reference creation class.
-
-    Note that we do not lift @RefWriter@ to the reference creation class, which a crucial restriction
-    in the LGtk interface; this is a feature.
-    -}
     liftRefReader :: RefReader m a -> m a
 
-    {- | @readRef@ lifted to the reference creation class.
-
-    @readRef@ === @liftRefReader . readRefSimple@
+    {- | @readRef@ === @liftRefReader . readRefSimple@
     -}
     readRef :: (RefClass r, RefReader m ~ RefReaderSimple r) => RefSimple r a -> m a
     readRef = liftRefReader . readRefSimple
@@ -161,10 +139,10 @@ class MonadRefReader m => MonadRefWriter m where
 
     liftRefWriter :: RefWriter m a -> m a
 
+    {- | @writeRef r@ === @liftRefWriter . writeRefSimple r@
+    -}
     writeRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> a -> m ()
     writeRef r = liftRefWriter . writeRefSimple r
-
-
 
 
 
@@ -172,8 +150,6 @@ class MonadRefReader m => MonadRefWriter m where
 {- | Monad for reference creation. Reference creation is not a method
 of the 'RefClass' type class to make possible to
 create the same type of references in multiple monads.
-
-@(Extref m) === (StateT s m)@, where 's' is an extendible state.
 
 For basic usage examples, look into the source of @Data.LensRef.Test@.
 -}
@@ -186,24 +162,24 @@ class (Monad m, RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRef
     Law 1: @extRef@ applies @k@ on @r@ backwards, i.e. 
     the result of @(extRef r k a0)@ should behaves exactly as @(lensMap k r)@.
 
-     *  @(liftM (k .) $ extRef r k a0)@ === @return r@
+    prop> (liftM (k .) $ extRef r k a0)  =  return r
 
     Law 2: @extRef@ does not change the value of @r@:
 
-     *  @(extRef r k a0 >> readRef r)@ === @(readRef r)@
+    prop> (extRef r k a0 >> readRef r)  =  readRef r
 
     Law 3: Proper initialization of newly defined reference with @a0@:
 
-     *  @(extRef r k a0 >>= readRef)@ === @(readRef r >>= set k a0)@
+    prop> (extRef r k a0 >>= readRef)  =  (readRef r >>= set k a0)
     -}
     extRef :: Ref m b -> Lens' a b -> a -> m (Ref m a)
 
     {- | @newRef@ extends the state @s@ in an independent way.
 
-    @newRef@ === @extRef unitRef (lens (const ()) (const id))@
+    @newRef@ === @extRef unitRef united@
     -}
     newRef :: a -> m (Ref m a)
-    newRef = extRef unitRef $ lens (const ()) (flip $ const id)
+    newRef = extRef unitRef united
 
 
 -- | TODO
@@ -234,46 +210,16 @@ class Monad m => MonadMemo m where
 class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier m), BaseRef (Modifier m) ~ BaseRef m, Monad (EffectM m),
     {- MonadRegister (Modifier m), -}EffectM (Modifier m) ~ EffectM m, Modifier (Modifier m) ~ Modifier m)
     => MonadRegister m where
-
-    {- |
-    Let @r@ be an effectless action (@RefReader@ guarantees this).
-
-    @(onChange init r fmm)@ has the following effect:
-
-    Whenever the value of @r@ changes (with respect to the given equality),
-    @fmm@ is called with the new value @a@.
-    The value of the @(fmm a)@ action is memoized,
-    but the memoized value is run again and again.
-
-    The boolean parameter @init@ tells whether the action should
-    be run in the beginning or not.
-
-    For example, let @(k :: a -> m b)@ and @(h :: b -> m ())@,
-    and suppose that @r@ will have values @a1@, @a2@, @a3@ = @a1@, @a4@ = @a2@.
-
-    @onChange True r $ \\a -> k a >>= return . h@
-
-    has the effect
-
-    @k a1 >>= \\b1 -> h b1 >> k a2 >>= \\b2 -> h b2 >> h b1 >> h b2@
-
-    and
-
-    @onChange False r $ \\a -> k a >>= return . h@
-
-    has the effect
-
-    @k a2 >>= \\b2 -> h b2 >> k a1 >>= \\b1 -> h b1 >> h b2@
-    -}
+{-
     onChangeAcc
         :: Eq b
         => RefReader m b
         -> b -> (b -> c)
         -> (b -> b -> c -> m (c -> m c))
         -> m (RefReader m c)
-
+-}
     onChange :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
-    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
+--    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
     onChangeSimple :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
     onChangeSimple r f = onChange r $ return . f
@@ -318,7 +264,7 @@ r `modRef` f = readRef r >>= writeRef r . f
 
 
 
-{- | RefClasss with inherent equivalence.
+{- | Reference with inherent equivalence.
 
 -}
 class RefClass r => EqRefClass r where

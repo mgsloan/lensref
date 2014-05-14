@@ -8,7 +8,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_HADDOCK hide #-}
+-- {-# OPTIONS_HADDOCK hide #-}
 {- |
 Register reference implementation for the @MonadRefCreator@ interface.
 
@@ -166,9 +166,7 @@ instance Monad n => MonadRegister (Register n) where
 
     liftToModifier = id
 
-    onChangeAcc r b0 c0 f = Register $ do
-        ff <- asks fst
-        magnify _2 $ toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister' ff . x) $ evalRegister' ff $ f b b' c'
+    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
     registerCallback f = Register $ do
         st <- ask
@@ -201,6 +199,11 @@ runRegister_ read write (Register m) = do
     return $ (,) a $ eval s
 
 ------------------------------------
+
+onChangeAcc r b0 c0 f = Register $ do
+    ff <- asks fst
+    magnify _2 $ toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister' ff . x) $ evalRegister' ff $ f b b' c'
+
 
 toSend
     :: (Eq b, MonadRefCreator m, MonadRefWriter m)

@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# OPTIONS_HADDOCK hide #-}
+--{-# OPTIONS_HADDOCK hide #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
 
@@ -202,8 +202,7 @@ instance NewRef m => MonadRegister (Register m) where
 
     liftToModifier = id
 
-    onChangeAcc r b0 c0 f = Reg $ ReaderT $ \ff ->
-        toSend True r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
+    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
     onChangeSimple r f = Reg $ ReaderT $ \ff ->
         toSend False r undefined undefined $ \b _ _ -> return $ \_ -> evalRegister ff $ f b
@@ -240,6 +239,9 @@ runRegister_ read write (Reg m) = unWrap $ do
         join $ Wrap read
         tick
 
+
+onChangeAcc r b0 c0 f = Reg $ ReaderT $ \ff ->
+    toSend True r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister ff . x) $ evalRegister ff $ f b b' c'
 
 toSend
     :: (Eq b, MonadRefCreator m, MonadRefWriter m)
