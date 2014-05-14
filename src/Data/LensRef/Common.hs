@@ -16,7 +16,6 @@ import Control.Concurrent
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
-import Control.Monad.Identity
 
 import Data.LensRef
 
