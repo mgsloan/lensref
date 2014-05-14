@@ -14,7 +14,9 @@ module Data.LensRef.Common where
 import Data.Monoid
 import Control.Concurrent
 import Control.Monad.State
+import Control.Monad.Writer
 import Control.Monad.Reader
+import Control.Monad.Identity
 
 import Data.LensRef
 
@@ -45,8 +47,10 @@ instance Monad m => Monoid (MonadMonoid m) where
 
 newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
 
+type SRef m a = Morph (StateT a m) m
+
 class Monad m => NewRef m where
-    newRef' :: a -> m (Morph (StateT a m) m)
+    newRef' :: a -> m (SRef m a)
 {-
 instance Monad m => NewRef (StateT LSt m) where
     newRef' x = do
@@ -63,6 +67,18 @@ instance NewRef IO where
         return $ Morph $ \m -> modifyMVar vx $ liftM swap . runStateT m
       where
         swap (a, b) = (b, a)
+
+instance NewRef m => NewRef (StateT s m) where
+    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
+        Morph $ \m -> StateT $ \s -> runMorph r $ flip mapStateT m $ \k -> flip liftM (runStateT k s) $ \((x, w), s) -> ((x, s), w)
+
+instance (Monoid w, NewRef m) => NewRef (WriterT w m) where
+    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
+        Morph $ \m -> WriterT $ runMorph r $ flip mapStateT m $ \k -> flip liftM (runWriterT k) $ \((x, s), w) -> ((x, w), s)
+
+instance NewRef m => NewRef (ReaderT r m) where
+    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
+        Morph $ \m -> ReaderT $ \st -> runMorph r $ flip mapStateT m $ flip runReaderT st
 
 ---------------------------
 
