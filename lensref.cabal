@@ -82,7 +82,6 @@ library
                     -D__PURE__
 
   ghc-options: 
-                    -threaded
                     -Wall 
                     -fno-warn-incomplete-patterns 
                     -fno-warn-name-shadowing 
