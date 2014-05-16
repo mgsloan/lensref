@@ -93,7 +93,7 @@ class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), R
     -}
     writeRefSimple :: RefSimple r a -> a -> RefWriterSimple r ()
 
-data family RefWriterOf (m :: * -> *) a :: *
+data family RefWriterOf (m :: * -> *) :: * -> *
 
 {- |
 There are two associated types of a reference, 'RefReaderSimple' and 'RefWriterSimple' which determines each-other.
