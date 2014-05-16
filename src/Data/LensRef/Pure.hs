@@ -139,7 +139,7 @@ instance MonadFix m => MonadFix (Register m) where
 
 instance Monad m => MonadRefReader (Register m) where
 
-    type BaseRef (Register n) = Lens_ LSt
+    type BaseRef (Register m) = Lens_ LSt
 
     liftRefReader = Register . lift . liftRefReader
 
