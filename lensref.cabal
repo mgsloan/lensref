@@ -1,5 +1,5 @@
 name:               lensref
-version:            0.1.0.2
+version:            0.1.0.3
 category:           Control, Data
 synopsis:           References which can be joined and on which lenses can be applied
 description:
@@ -62,12 +62,12 @@ library
                     src
   build-depends:
                     base < 5
-                  , transformers >= 0.3 && < 0.5
-                  , mtl >= 2 && < 2.3
-                  , monad-control == 0.3.*
-                  , operational == 0.2.*
-                  , lens == 4.1.*
-                  , containers == 0.5.*
+                  , transformers < 0.5
+                  , mtl < 2.3
+                  , monad-control < 0.4
+                  , operational < 0.3
+                  , lens < 4.2
+                  , containers < 0.6
 
   exposed-modules:
                     Data.LensRef
