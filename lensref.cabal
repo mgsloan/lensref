@@ -64,7 +64,6 @@ library
                   , transformers >= 0.3 && < 0.5
                   , mtl < 2.3
                   , monad-control < 0.4
-                  , containers < 0.6
   exposed-modules:
                     Data.LensRef
                     Data.LensRef.Common
@@ -77,6 +76,7 @@ library
                     -D__TESTS__
     build-depends:
                     operational < 0.3
+                  , containers < 0.6
                   , lens < 4.2
     exposed-modules:
                     Data.LensRef.TestEnv

@@ -25,10 +25,7 @@ import Data.Monoid
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Arrow (second)
-import qualified Data.Sequence as Seq
 import Control.Lens.Simple
-import Data.Foldable (toList)
 
 import Unsafe.Coerce
 
@@ -52,7 +49,7 @@ newtype Lens_ a b = Lens_ {unLens_ :: Lens' a b}
 runLens_ :: Reader a (Lens_ a b) -> Lens' a b
 runLens_ r f a = unLens_ (runReader r a) f a
 
-type LSt = Seq.Seq CC
+type LSt = [CC]
 
 data CC = forall a . CC (LSt -> a -> a) a
 
@@ -89,13 +86,13 @@ instance Monad m => MonadRefCreator (StateT LSt m) where
         rk = set (runLens_ r) . (^. r2)
         kr = set r2 . (^. runLens_ r)
 
-        extend x0 = (return $ Lens_ $ lens get set, x0 Seq.|> CC kr (kr x0 a0))
+        extend x0 = (return $ Lens_ $ lens get set, x0 ++ [CC kr (kr x0 a0)])
           where
-            limit = second toList . Seq.splitAt (Seq.length x0)
+            limit = splitAt (length x0)
 
             get = unsafeData . head . snd . limit
 
-            set x a = foldl (\x -> (Seq.|>) x . ap_ x) (rk a zs Seq.|> CC kr a) ys where
+            set x a = foldl (\x -> (x++) . (:[]) . ap_ x) (rk a zs ++ [CC kr a]) ys where
                 (zs, _ : ys) = limit x
 
         ap_ :: LSt -> CC -> CC
