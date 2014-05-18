@@ -29,7 +29,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Arrow (second)
 import qualified Data.Sequence as Seq
-import Control.Lens hiding ((|>))
+import Control.Lens.Simple
 import Data.Foldable (toList)
 
 import Unsafe.Coerce
@@ -49,10 +49,10 @@ newtype instance RefWriterOf (ReaderT s m) a
 
 ----------------------
 
-newtype Lens_ a b = Lens_ {unLens_ :: ALens' a b}
+newtype Lens_ a b = Lens_ {unLens_ :: Lens' a b}
 
 runLens_ :: Reader a (Lens_ a b) -> Lens' a b
-runLens_ r f a = cloneLens (unLens_ $ runReader r a) f a
+runLens_ r f a = unLens_ (runReader r a) f a
 
 type LSt = Seq.Seq CC
 
@@ -75,7 +75,7 @@ instance MonadRefWriter (RefWriterOf (Reader LSt)) where
 instance RefClass (Lens_ LSt) where
     type RefReaderSimple (Lens_ LSt) = Reader LSt
 
-    readRefSimple = view . runLens_
+    readRefSimple r = view $ runLens_ r
     writeRefSimple r a = runLens_ r .= a
     lensMap l r = return $ Lens_ $ runLens_ r . l
     unitRef = return $ Lens_ united

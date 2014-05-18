@@ -50,7 +50,7 @@ module Data.LensRef
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Lens (Lens', set, united)
+import Control.Lens.Simple (Lens', set, united)
 
 --------------------------------
 

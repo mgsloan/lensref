@@ -28,7 +28,7 @@ import Data.Monoid
 import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Lens
+import Control.Lens.Simple
 
 import Data.LensRef
 import Data.LensRef.Common

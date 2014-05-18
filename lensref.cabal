@@ -65,17 +65,20 @@ library
                   , transformers >= 0.3 && < 0.5
                   , mtl < 2.3
                   , monad-control < 0.4
-                  , operational < 0.3
                   , containers < 0.6
-                  , lens < 4.2
   exposed-modules:
                     Data.LensRef
                     Data.LensRef.Common
                     Data.LensRef.Pure
                     Data.LensRef.Fast
+  ohter-modules:
+                    Control.Lens.Simple
   if flag(tests)
     cpp-options:
                     -D__TESTS__
+    build-depends:
+                    operational < 0.3
+                  , lens < 4.2
     exposed-modules:
                     Data.LensRef.TestEnv
                     Data.LensRef.Test
