@@ -244,12 +244,15 @@ runTest_ :: (Eq a, Show a, m ~ Prog n)
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ name lift runRegister_ r p0 = putStr $ unlines $ handEr name $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
+runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
     (Just (a1,c),pe) <- coeval_ lift (runRegister_ (singleton ReadI) (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
     (_, pr) <- coeval_ lift c p
     getProg' pr
+
+showError [] = return ()
+showError xs = fail $ "\n" ++ unlines xs
 
 ------------------------------------------------
 

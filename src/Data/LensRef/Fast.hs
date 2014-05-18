@@ -19,9 +19,7 @@ TODO
 module Data.LensRef.Fast
     ( Register
     , runRegister
-#ifdef __TESTS__
     , runTests
-#endif
     ) where
 
 import Data.Monoid
@@ -304,6 +302,7 @@ instance MonadRegisterRun (Register (Prog TP)) where
 
 newtype TP = TP { unTP :: Wrap (Prog TP) () }
 
+runTests :: IO ()
 runTests = do
     mkTests runTestSimple
     tests runTest
@@ -314,5 +313,8 @@ runTest name = runTest_ name (TP . lift) runReg
 
 runTestSimple :: Register (Prog TP) () -> IO ()
 runTestSimple m = runTest "" m $ return ((), return ())
+#else
+runTests :: IO ()
+runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
 

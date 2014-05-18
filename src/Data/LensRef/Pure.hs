@@ -18,9 +18,7 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 module Data.LensRef.Pure
     ( Register
     , runRegister
-#ifdef __TESTS__
     , runTests
-#endif
     ) where
 
 import Data.Monoid
@@ -265,6 +263,7 @@ instance MonadRegisterRun (Register (Prog TP)) where
 
 newtype TP = TP { unTP :: SLSt (Prog TP) () }
 
+runTests :: IO ()
 runTests = do
     mkTests runTestSimple
     tests runTest
@@ -275,6 +274,8 @@ runTest name m p = do
 
 runTestSimple :: Register (Prog TP) () -> IO ()
 runTestSimple m = runTest "" m $ return ((), return ())
+#else
+runTests :: IO ()
+runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
-
 

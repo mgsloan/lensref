@@ -43,7 +43,7 @@ author:             Péter Diviánszky
 homepage:           http://www.haskell.org/haskellwiki/LGtk
 bug-reports:        https://github.com/divipp/lensref/issues
 maintainer:         divipp@gmail.com
-cabal-version:      >= 1.8
+cabal-version:      >= 1.9.2
 build-type:         Simple
 extra-source-files: changelog
 
@@ -54,7 +54,6 @@ source-repository head
 Flag tests
   Description:      Build the tests
   Default:          False
-
 
 library
 
@@ -71,7 +70,7 @@ library
                     Data.LensRef.Common
                     Data.LensRef.Pure
                     Data.LensRef.Fast
-  ohter-modules:
+  other-modules:
                     Control.Lens.Simple
   if flag(tests)
     cpp-options:
@@ -90,4 +89,13 @@ library
                     -fno-warn-missing-signatures 
                     -fno-warn-orphans
                     -fno-warn-type-defaults
+
+test-suite runtests
+
+  type:             exitcode-stdio-1.0
+  main-is:          runtests.hs
+  build-depends:
+                    base < 5
+                  , lensref
+
 
