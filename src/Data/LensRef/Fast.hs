@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP #-}
 --{-# OPTIONS_HADDOCK hide #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
@@ -18,7 +19,9 @@ TODO
 module Data.LensRef.Fast
     ( Register
     , runRegister
+#ifdef __TESTS__
     , runTests
+#endif
     ) where
 
 import Data.Monoid
@@ -29,8 +32,10 @@ import Control.Lens
 
 import Data.LensRef
 import Data.LensRef.Common
+#ifdef __TESTS__
 import Data.LensRef.TestEnv
 import Data.LensRef.Test
+#endif
 
 ----------------------
 
@@ -290,6 +295,7 @@ toSend memoize rb b0 c0 fb = do
 
 --------------------------
 
+#ifdef __TESTS__
 instance MonadRegisterRun (Register (Prog TP)) where
 
     type AsocT (Register (Prog TP)) = TP
@@ -308,4 +314,5 @@ runTest name = runTest_ name (TP . lift) runReg
 
 runTestSimple :: Register (Prog TP) () -> IO ()
 runTestSimple m = runTest "" m $ return ((), return ())
+#endif
 

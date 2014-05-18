@@ -8,6 +8,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE CPP #-}
 -- {-# OPTIONS_HADDOCK hide #-}
 {- |
 Register reference implementation for the @MonadRefCreator@ interface.
@@ -17,7 +18,9 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 module Data.LensRef.Pure
     ( Register
     , runRegister
+#ifdef __TESTS__
     , runTests
+#endif
     ) where
 
 import Data.Monoid
@@ -33,8 +36,10 @@ import Unsafe.Coerce
 
 import Data.LensRef
 import Data.LensRef.Common
+#ifdef __TESTS__
 import Data.LensRef.TestEnv
 import Data.LensRef.Test
+#endif
 
 ----------------------
 
@@ -251,6 +256,7 @@ toSend rb b0 c0 fb = do
 
 ------------------------
 
+#ifdef __TESTS__
 instance MonadRegisterRun (Register (Prog TP)) where
 
     type AsocT (Register (Prog TP)) = TP
@@ -269,6 +275,6 @@ runTest name m p = do
 
 runTestSimple :: Register (Prog TP) () -> IO ()
 runTestSimple m = runTest "" m $ return ((), return ())
-
+#endif
 
 

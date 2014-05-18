@@ -51,8 +51,8 @@ source-repository head
   type:             git
   location:         https://github.com/divipp/lensref.git
 
-Flag Pure
-  Description:      Use the pure but slow implementation
+Flag tests
+  Description:      Build the tests
   Default:          False
 
 
@@ -66,20 +66,19 @@ library
                   , mtl < 2.3
                   , monad-control < 0.4
                   , operational < 0.3
-                  , lens < 4.2
                   , containers < 0.6
-
+                  , lens < 4.2
   exposed-modules:
                     Data.LensRef
                     Data.LensRef.Common
-                    Data.LensRef.TestEnv
-                    Data.LensRef.Test
                     Data.LensRef.Pure
                     Data.LensRef.Fast
-                    Data.LensRef.Default
-  if flag(Pure)
+  if flag(tests)
     cpp-options:
-                    -D__PURE__
+                    -D__TESTS__
+    exposed-modules:
+                    Data.LensRef.TestEnv
+                    Data.LensRef.Test
 
   ghc-options: 
                     -Wall 
