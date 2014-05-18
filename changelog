@@ -1,4 +1,11 @@
 
+= lensref-0.2 =
+
+* Do not always build tests
+* 'cabal test' support
+* Eliminate dependency on lens, operational and containers packages
+* Add lower bound to transformers package dependency
+
 = lensref-0.1.0.5 =
 
 another bugfix for hackagedb
