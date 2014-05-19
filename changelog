@@ -2,6 +2,7 @@
 = lensref-0.2 =
 
 * Data.LensRef provides a restricted (and probably less confusing) interface
+* Rename onChange combinators
 
 = lensref-0.2 =
 

@@ -22,7 +22,7 @@ module Data.LensRef
     , RefWriter
 
     -- ** Dynamic networks
-    , onChangeMemo, onChange, Modifier, MonadRegister --MonadRegister (..)
+    , onChange, onChangeMemo, Modifier, MonadRegister --MonadRegister (..)
 --    , RegionStatusChange (..)
 
     -- ** Other

@@ -28,7 +28,15 @@ The needed definitions in a form which is general enough to our current purposes
 > united :: Lens' a ()
 > united = (const (), const)
 
+> _1 :: Lens' (x, y) x
+> _1 = (fst, \(_, y) x -> (x, y))
 
+> _2 :: Lens' (x, y) y
+> _2 = (snd, \(x, _) y -> (x, y))
+
+> (.) :: Lens' a b -> Lens' b c -> Lens' a c
+> -- I cheat here, read ... to understand how function
+> -- composition can be used for lens compostion
 
 ## How to apply a lens to an `IORef`?
 
@@ -262,9 +270,13 @@ The discussed data types and operations so far are the following:
 
 # Connecting events to reference change
 
-This operation is the last big step into the direction of an FRP system:
+This operation is the last big step into the direction of a fully working FRP system:
 
 > onChange :: Eq a => ReadRef a -> (a -> CreateRef b) -> CreateRef (ReadRef b)
+
+## Semantics with examples
+
+TODO
 
 
 ## Variations
@@ -274,16 +286,21 @@ This operation is the last big step into the direction of an FRP system:
 > onChangeAcc :: Eq a => b -> ReadRef a -> (b -> a -> CreateRef b) -> CreateRef (ReadRef b)
 
 
+TODO
 
 
 # Bindings to outer actions
 
+TODO
 
 ## Resource handling
 
+TODO
 
 
 # Summary
+
+TODO
 
 ## Comparison to existing Haskell FRP frameworks
 
@@ -297,6 +314,7 @@ netwire
 yampa
 
 
+TODO
 
 
 
