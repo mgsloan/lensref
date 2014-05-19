@@ -205,9 +205,9 @@ instance NewRef m => MonadRegister (Register m) where
 
     liftToModifier = id
 
-    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
+    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
-    onChangeSimple r f = Reg $ ReaderT $ \ff ->
+    onChange r f = Reg $ ReaderT $ \ff ->
         toSend False r undefined undefined $ \b _ _ -> return $ \_ -> evalRegister ff $ f b
 
     registerCallback f = Reg $ ReaderT $ \ff -> do

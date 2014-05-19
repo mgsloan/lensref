@@ -357,7 +357,7 @@ tests runTest = do
 
     runTest "postponed" (do
         r <- newRef "x"
-        _ <- onChangeSimple (readRef r) message
+        _ <- onChange (readRef r) message
         postponeModification $ writeRef r "x"
         postponeModification $ writeRef r "y"
         return ()
@@ -366,10 +366,10 @@ tests runTest = do
         return $ (,) () $ do
             message' "y"
 
-    runTest "onChangeSimple" (do
+    runTest "onChange" (do
         r <- newRef "x"
         listen 1 $ writeRef r
-        _ <- onChangeSimple (readRef r) message
+        _ <- onChange (readRef r) message
         return ()
             ) $ do
         message' "listener #0"
@@ -379,12 +379,12 @@ tests runTest = do
             send 1 "y"
             message' "y"
 
-    runTest "onChangeSimple + listener" (do
+    runTest "onChange + listener" (do
         r1 <- newRef "x"
         r2 <- newRef "y"
         listen 1 $ writeRef r1
         listen 2 $ writeRef r2
-        _ <- onChangeSimple (liftM2 (++) (readRef r1) (readRef r2)) message
+        _ <- onChange (liftM2 (++) (readRef r1) (readRef r2)) message
         return ()
             ) $ do
         message' "listener #0"
@@ -399,7 +399,7 @@ tests runTest = do
             send 2 "x"
             message' "yx"
 
-    runTest "onChangeSimple + join" (do
+    runTest "onChange + join" (do
         r1 <- newRef "x"
         r2 <- newRef "y"
         rr <- newRef r1
@@ -408,7 +408,7 @@ tests runTest = do
         listen 3 $ \i -> case i of
             True  -> writeRef rr r1
             False -> writeRef rr r2
-        _ <- onChangeSimple (readRef $ join $ readRef rr) message
+        _ <- onChange (readRef $ join $ readRef rr) message
         return ()
             ) $ do
         message' "listener #0"
@@ -431,7 +431,7 @@ tests runTest = do
 
     runTest "" (do
         r <- newRef (0 :: Int)
-        _ <- onChange (readRef r) $ \i -> case i of
+        _ <- onChangeMemo (readRef r) $ \i -> case i of
             0 -> return $ do
                 listen 1 $ \s -> do
                     when (s == "f") $ do
@@ -481,8 +481,8 @@ tests runTest = do
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
-        _ <- onChange (readRef r) $ \r -> return $ message $ show r
-        _ <- onChange (readRef q) $ \r -> return $ message $ show r
+        _ <- onChangeMemo (readRef r) $ \r -> return $ message $ show r
+        _ <- onChangeMemo (readRef q) $ \r -> return $ message $ show r
         postponeModification $ writeRef r Nothing
         postponeModification $ writeRef q1 True
         postponeModification $ writeRef q2 1

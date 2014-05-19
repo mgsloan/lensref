@@ -199,11 +199,11 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
         -> (b -> b -> c -> m (c -> m c))
         -> m (RefReader m c)
 -}
-    onChange :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
---    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
+    onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
+--    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
-    onChangeSimple :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
-    onChangeSimple r f = onChange r $ return . f
+    onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChange r f = onChangeMemo r $ return . f
 
     onRegionStatusChange :: (RegionStatusChange -> m ()) -> m ()
 

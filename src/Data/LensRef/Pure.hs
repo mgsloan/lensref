@@ -166,7 +166,7 @@ instance Monad n => MonadRegister (Register n) where
 
     liftToModifier = id
 
-    onChange r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
+    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
     registerCallback f = Register $ do
         st <- ask
