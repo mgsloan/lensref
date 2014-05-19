@@ -1,6 +1,10 @@
 
 = lensref-0.2 =
 
+* Data.LensRef provides a restricted (and probably less confusing) interface
+
+= lensref-0.2 =
+
 * Do not always build tests
 * 'cabal test' support
 * Eliminate dependency on lens, operational and containers packages
