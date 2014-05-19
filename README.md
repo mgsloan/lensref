@@ -4,6 +4,8 @@
 ## What are lens references?
 
 They are references which can be joined and on which lenses can be applied.
+More documentation can be found in the `docs` directory:
+[Introduction to state-based FRP (pdf)](https://github.com/divipp/lensref/blob/master/docs/Introduction.pdf)
 
 The lensref package provides and interface an two implementation for lens references.
 
@@ -26,9 +28,10 @@ To see what is possible to do with lens references, look at the test cases in mo
 
 ## Links
 
-* [haskell.org wiki page](http://www.haskell.org/haskellwiki/LGtk)
+* [Introduction to state-based FRP (pdf)](https://github.com/divipp/lensref/blob/master/docs/Introduction.pdf)
 * [Haddock documentation on HackageDB](http://hackage.haskell.org/package/lensref)
 * [Wordpress blog](http://lgtk.wordpress.com/)
+* [haskell.org wiki page](http://www.haskell.org/haskellwiki/LGtk)
 * [GitHub repository (this page)](https://github.com/divipp/lensref)
 
 

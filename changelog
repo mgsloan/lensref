@@ -1,8 +1,9 @@
 
-= lensref-0.2 =
+= lensref-0.3 =
 
 * Data.LensRef provides a restricted (and probably less confusing) interface
 * Rename onChange combinators
+* Documentation: Introduction to state-based FRP (under construction)
 
 = lensref-0.2 =
 
