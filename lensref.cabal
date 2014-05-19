@@ -46,6 +46,8 @@ maintainer:         divipp@gmail.com
 cabal-version:      >= 1.9.2
 build-type:         Simple
 extra-source-files: changelog
+                    docs/Introduction.pandoc
+                    docs/Makefile
 
 source-repository head
   type:             git
