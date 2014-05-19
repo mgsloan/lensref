@@ -17,7 +17,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
 
-import Data.LensRef
+import Data.LensRef.Class
 
 ----------------
 
@@ -31,7 +31,7 @@ runRefWriterT m = do
     return (a, r)
 
 tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
-tell' w = ReaderT $ \m -> modRef m (`mappend` w)
+tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
 
 -------------
 

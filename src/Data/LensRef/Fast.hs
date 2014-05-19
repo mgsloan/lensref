@@ -28,7 +28,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Lens.Simple
 
-import Data.LensRef
+import Data.LensRef.Class
 import Data.LensRef.Common
 #ifdef __TESTS__
 import Data.LensRef.TestEnv

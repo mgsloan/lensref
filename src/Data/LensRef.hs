@@ -1,20 +1,42 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# OPTIONS_HADDOCK prune #-}
+-- {-# OPTIONS_HADDOCK prune #-}
 module Data.LensRef
     (
     -- * Core
-      module Data.LensRef.Class
+
+    -- ** References
+      unitRef, lensMap      , RefReaderSimple, RefClass --RefClass (..)
+            , RefSimple
+--    , RefWriterOf
+--    , RefWriterSimple
+
+    , liftRefReader, readRef --MonadRefReader (..)
+    , writeRef --MonadRefWriter (..)
+
+    -- ** Reference creation
+    , newRef, extRef, MonadRefCreator --MonadRefCreator (..)
+    , Ref
+    , RefReader
+    , RefWriter
+
+    -- ** Dynamic networks
+    , onChange, onChangeSimple, Modifier, MonadRegister --MonadRegister (..)
+--    , RegionStatusChange (..)
+
+    -- ** Other
+    , memoRead --MonadMemo (..)
 
     -- * Derived constructs
     , modRef
     , postponeModification
 --    , undoTr
 
-    , EqRefClass (..)
-    , EqRefSimple, EqRef
-    , hasEffect
+    , EqRefClass        --EqRefClass (..)
+            , hasEffect
+--    , EqRefSimple
+    , EqRef
     , toEqRef
     , fromEqRef
     , newEqRef

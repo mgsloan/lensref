@@ -29,7 +29,7 @@ import Control.Lens.Simple
 
 import Unsafe.Coerce
 
-import Data.LensRef
+import Data.LensRef.Class
 import Data.LensRef.Common
 #ifdef __TESTS__
 import Data.LensRef.TestEnv

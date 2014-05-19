@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_HADDOCK prune #-}
+{-# OPTIONS_HADDOCK not-home #-}
 -- | Core lensref interface
 module Data.LensRef.Class
     (

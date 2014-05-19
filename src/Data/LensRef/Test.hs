@@ -18,6 +18,7 @@ import Control.Arrow ((***))
 import Control.Lens
 
 import Data.LensRef
+import Data.LensRef.Class
 import Data.LensRef.TestEnv
 
 -----------------------------------------------------------------

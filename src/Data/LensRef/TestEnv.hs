@@ -20,6 +20,7 @@ import Control.Lens hiding ((|>), view)
 import Unsafe.Coerce
 
 import Data.LensRef
+import Data.LensRef.Class
 import Data.LensRef.Common
 
 ----------------------
