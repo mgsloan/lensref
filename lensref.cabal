@@ -65,10 +65,11 @@ library
                   , mtl < 2.3
                   , monad-control < 0.4
   exposed-modules:
-                    Data.LensRef
+                    Data.LensRef.Class
                     Data.LensRef.Common
                     Data.LensRef.Pure
                     Data.LensRef.Fast
+                    Data.LensRef
   other-modules:
                     Control.Lens.Simple
   if flag(tests)
