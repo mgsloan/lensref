@@ -120,7 +120,7 @@ make this network fully dynamic with `joinRef`.
 I call it `joinRef` because with another representation of `IORef'`, `joinRef`
 is just `join`!
 
-> type IORef'' a = IO (a, b -> IO ())
+> type IORef'' a = IO (a, a -> IO ())
 
 > convTo :: IORef' a -> IORef'' a
 > convTo (read, write) = do
