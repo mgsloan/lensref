@@ -1,15 +1,11 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
--- | Tests for the @MonadRefCreator@ interface.
+-- | Tests for the lens references interface.
 module Data.LensRef.Test
     ( -- * Tests for the interface
-      mkTests
-    , tests
+      tests
     ) where
 
 import Data.Maybe
@@ -23,39 +19,20 @@ import Data.LensRef.TestEnv
 
 -----------------------------------------------------------------
 
-{- | 
-@mkTests@ generates a list of error messages which should be emtpy.
-
-Look inside the sources for the tests.
--}
-mkTests :: (MonadRegisterRun m, MonadRefWriter m, EffectM m ~ Prog (AsocT m), Monad n)
-    => (m () -> n ())
+-- | Look inside the sources for the tests.
+tests :: (MonadRegisterRun m, MonadRefWriter m, EffectM m ~ Prog (AsocT m), Monad n, MonadRegister (Modifier m))
+    => (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()
 
-mkTests runTest = do
-    newRefTest
-    writeRefsTest
-    extRefTest
-    joinTest
-    joinTest2
-    chainTest0
-    forkTest
-    forkTest2
-    chainTest
-    chainTest'
-    undoTest
-    undoTest2
-    undoTest3
+tests runTest = do
 
---    writeRefTest
-  where
+    let runTestSimple name t = runTest name t $ return ((), return ())
 
-    newRefTest = runTest $ do
+    runTestSimple "newRefTest" $ do
         r <- newRef (3 :: Int)
         r ==> 3
 
-
-    writeRefsTest = runTest $ do
+    runTestSimple "writeRefsTest" $ do
         r1 <- newRef (3 :: Int)
         r2 <- newRef (13 :: Int)
         r1 ==> 3
@@ -67,7 +44,7 @@ mkTests runTest = do
         r1 ==> 4
         r2 ==> 0
 
-    extRefTest = runTest $ do
+    runTestSimple "extRefTest" $ do
         r <- newRef $ Just (3 :: Int)
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
@@ -83,7 +60,7 @@ mkTests runTest = do
         writeRef q2 1
         r ==> Just 1
 
-    joinTest = runTest $ do
+    runTestSimple "joinTest" $ do
         r2 <- newRef (5 :: Int)
         r1 <- newRef 3
         rr <- newRef r1
@@ -99,14 +76,14 @@ mkTests runTest = do
         writeRef r2 14
         r ==> 14
 
-    joinTest2 = runTest $ do
+    runTestSimple "joinTest2" $ do
         r1 <- newRef (3 :: Int)
         rr <- newRef r1
         r2 <- newRef 5
         writeRef rr r2
         join (readRef rr) ==> 5
 
-    chainTest0 = runTest $ do
+    runTestSimple "chainTest0" $ do
         r <- newRef (1 :: Int)
         q <- extRef r id 0
         s <- extRef q id 0
@@ -126,7 +103,7 @@ mkTests runTest = do
         q ==> 4
         s ==> 4
 
-    forkTest = runTest $ do
+    runTestSimple "forkTest" $ do
         r <- newRef (1 :: Int)
         q <- extRef r id 0
         s <- extRef r id 0
@@ -146,7 +123,7 @@ mkTests runTest = do
         q ==> 4
         s ==> 4
 
-    forkTest2 = runTest $ do
+    runTestSimple "forkTest2" $ do
         r <- newRef $ Just (1 :: Int)
         q <- extRef r maybeLens (False, 0)
         s <- extRef r maybeLens (False, 0)
@@ -190,7 +167,7 @@ mkTests runTest = do
         q ==> (True, 4)
         s ==> (True, 4)
 
-    chainTest = runTest $ do
+    runTestSimple "chainTest" $ do
         r <- newRef $ Just Nothing
         q <- extRef r maybeLens (False, Nothing)
         s <- extRef (_2 `lensMap` q) maybeLens (False, 3 :: Int)
@@ -203,7 +180,7 @@ mkTests runTest = do
         q ==> (False, Nothing)
         s ==> (False, 3)
 
-    chainTest' = runTest $ do
+    runTestSimple "chainTest1" $ do
         r <- newRef $ Just $ Just (3 :: Int)
         q <- extRef r maybeLens (False, Nothing)
         s <- extRef (_2 `lensMap` q) maybeLens (False, 0 :: Int)
@@ -227,18 +204,22 @@ mkTests runTest = do
         q ==> (True, Just 3)
         s ==> (True, 3)
 
-    undoTest = runTest $ do
+    runTestSimple "undoTest" $ do
         r <- newRef (3 :: Int)
         q <- extRef r (lens head $ flip (:)) []
         writeRef r 4
         q ==> [4, 3]
 
-    undoTest2 = runTest $ do
+    runTestSimple "undoTest2" $ do
         r <- newRef (3 :: Int)
         q <- extRef r (lens head $ flip (:)) []
         q ==> [3]
 
-    undoTest3 = runTest $ do
+    let
+        push m = m >>= maybe (return ()) liftRefWriter
+        m === t = m >>= \x -> isJust x ==? t
+
+    runTestSimple "undoTest3" $ do
         r <- newRef (3 :: Int)
         (undo, redo) <- liftM (liftRefReader *** liftRefReader) $ undoTr (==) r
         r ==> 3
@@ -268,48 +249,7 @@ mkTests runTest = do
         r ==> 6
         redo === False
         undo === True
-      where
-        push m = m >>= \x -> maybe (return ()) liftRefWriter x
-        m === t = m >>= \x -> isJust x ==? t
 
---------------------------
-
-maybeLens :: Lens' (Bool, a) (Maybe a)
-maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
-              (\(_,a) x -> maybe (False, a) (\a' -> (True, a')) x)
-
--- | Undo-redo state transformation.
-undoTr
-    :: MonadRegister m =>
-       (a -> a -> Bool)     -- ^ equality on state
-    -> Ref m a             -- ^ reference of state
-    ->   m ( RefReader m (Maybe (RefWriter m ()))
-           , RefReader m (Maybe (RefWriter m ()))
-           )  -- ^ undo and redo actions
-undoTr eq r = do
-    ku <- extRef r (undoLens eq) ([], [])
-    let try f = liftM (liftM (writeRefSimple ku) . f) $ readRef ku
-    return (try undo, try redo)
-  where
-    undo (x: xs@(_:_), ys) = Just (xs, x: ys)
-    undo _ = Nothing
-
-    redo (xs, y: ys) = Just (y: xs, ys)
-    redo _ = Nothing
-
-undoLens :: (a -> a -> Bool) -> Lens' ([a],[a]) a
-undoLens eq = lens get set where
-    get = head . fst
-    set (x' : xs, ys) x | eq x x' = (x: xs, ys)
-    set (xs, _) x = (x : xs, [])
-
-
-----------------------------------------------------------------------------
-
-tests :: (MonadRegisterRun m, EffectM m ~ Prog (AsocT m), Monad n, MonadRegister (Modifier m))
-    => (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
-    -> n ()
-tests runTest = do
 
     runTest "trivial" (return ()) $ do
         return ((), return ())
@@ -498,5 +438,38 @@ tests runTest = do
             message' "(True,1)"
             return ()
 -}
+
+
+-------------------------- auxiliary definitions
+
+maybeLens :: Lens' (Bool, a) (Maybe a)
+maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
+              (\(_,a) x -> maybe (False, a) (\a' -> (True, a')) x)
+
+-- | Undo-redo state transformation.
+undoTr
+    :: MonadRegister m =>
+       (a -> a -> Bool)     -- ^ equality on state
+    -> Ref m a             -- ^ reference of state
+    ->   m ( RefReader m (Maybe (RefWriter m ()))
+           , RefReader m (Maybe (RefWriter m ()))
+           )  -- ^ undo and redo actions
+undoTr eq r = do
+    ku <- extRef r (undoLens eq) ([], [])
+    let try f = liftM (liftM (writeRefSimple ku) . f) $ readRef ku
+    return (try undo, try redo)
+  where
+    undo (x: xs@(_:_), ys) = Just (xs, x: ys)
+    undo _ = Nothing
+
+    redo (xs, y: ys) = Just (y: xs, ys)
+    redo _ = Nothing
+
+undoLens :: (a -> a -> Bool) -> Lens' ([a],[a]) a
+undoLens eq = lens get set where
+    get = head . fst
+    set (x' : xs, ys) x | eq x x' = (x: xs, ys)
+    set (xs, _) x = (x : xs, [])
+
 
 

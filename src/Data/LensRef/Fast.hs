@@ -303,16 +303,10 @@ instance MonadRegisterRun (Register (Prog TP)) where
 newtype TP = TP { unTP :: Wrap (Prog TP) () }
 
 runTests :: IO ()
-runTests = do
-    mkTests runTestSimple
-    tests runTest
-
+runTests = tests runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
 runTest name = runTest_ name (TP . lift) runReg
-
-runTestSimple :: Register (Prog TP) () -> IO ()
-runTestSimple m = runTest "" m $ return ((), return ())
 #else
 runTests :: IO ()
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"

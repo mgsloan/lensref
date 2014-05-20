@@ -274,6 +274,11 @@ This operation is the last big step into the direction of a fully working FRP sy
 
 > onChange :: Eq a => ReadRef a -> (a -> CreateRef b) -> CreateRef (ReadRef b)
 
+
+
+> onChange :: ReadRef (CreateRef b) -> CreateRef (ReadRef b)
+
+
 ## Semantics with examples
 
 TODO
@@ -291,9 +296,16 @@ TODO
 
 # Bindings to outer actions
 
-TODO
+    registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
+
+
+> liftEffect :: ... a -> CreateRef a
 
 ## Resource handling
+
+    onRegionStatusChange :: (RegionStatusChange -> m ()) -> m ()
+
+data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 TODO
 
@@ -312,7 +324,7 @@ Sodium
 Elm
 netwire
 yampa
-
+iTask
 
 TODO
 
