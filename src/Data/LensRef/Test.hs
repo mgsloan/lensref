@@ -218,7 +218,7 @@ tests runTest = do
         q ==> [3]
 
     let
-        push m = m >>= maybe (return ()) liftRefWriter
+        perform m = m >>= maybe (return ()) liftRefWriter
         m === t = m >>= \x -> isJust x ==? t
 
     runTestSimple "undoTest3" $ do
@@ -235,15 +235,15 @@ tests runTest = do
         r ==> 5
         redo === False
         undo === True
-        push undo
+        perform undo
         r ==> 4
         redo === True
         undo === True
-        push undo
+        perform undo
         r ==> 3
         redo === True
         undo === False
-        push redo
+        perform redo
         r ==> 4
         redo === True
         undo === True
@@ -371,7 +371,7 @@ tests runTest = do
             message' "b"
 
 
-    runTest "" (do
+    runTest "bla" (do
         r <- newRef (0 :: Int)
         _ <- onChangeMemo (readRef r) $ \i -> case i of
             0 -> return $ do
