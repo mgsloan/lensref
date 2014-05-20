@@ -1,12 +1,12 @@
 module Main where
 
-import qualified Data.LensRef.Pure as Pure
-import qualified Data.LensRef.Fast as Fast
+import Data.LensRef.Pure
+import Data.LensRef.Fast
 
 main :: IO ()
 main = do
-    putStrLn "running tests for pure implementation"
-    Pure.runTests
-    putStrLn "running tests for fast implementation"
-    Fast.runTests
+    putStrLn "running tests for the pure implementation"
+    Data.LensRef.Pure.runTests
+    putStrLn "running tests for the fast implementation"
+    Data.LensRef.Fast.runTests
 
