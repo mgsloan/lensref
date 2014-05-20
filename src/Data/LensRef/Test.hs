@@ -9,7 +9,7 @@ module Data.LensRef.Test
     ) where
 
 import Data.Maybe
-import Control.Monad.State
+import Control.Monad
 import Control.Arrow ((***))
 import Control.Lens
 
@@ -20,13 +20,15 @@ import Data.LensRef.TestEnv
 -----------------------------------------------------------------
 
 -- | Look inside the sources for the tests.
-tests :: (MonadRegisterRun m, MonadRefWriter m, EffectM m ~ Prog (AsocT m), Monad n, MonadRegister (Modifier m))
+tests :: (MonadRegister m, MonadRefWriter m, EffectM m ~ Prog k, MonadRegister (Modifier m), Monad n)
     => (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()
 
 tests runTest = do
 
     let runTestSimple name t = runTest name t $ return ((), return ())
+
+    let r ==> v = readRef r >>= (==? v)
 
     runTestSimple "newRefTest" $ do
         r <- newRef (3 :: Int)

@@ -68,6 +68,13 @@ instance NewRef (Prog t) where
 message :: (MonadRegister m, EffectM m ~ Prog t) => String -> m ()
 message = liftEffectM . singleton . Message
 
+infix 0 ==?
+
+-- | Check an equality.
+(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (Modifier m)) => a -> a -> m ()
+rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
+
+
 listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> Modifier m ()) -> m ()
 listen i m = do
     f <- registerCallback m
@@ -254,19 +261,6 @@ runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT
 
 showError [] = return ()
 showError xs = fail $ "\n" ++ unlines xs
-
-------------------------------------------------
-
--- | Check an equality.
-(==?) :: (Eq a, Show a, MonadRegisterRun m, EffectM m ~ Prog (AsocT m)) => a -> a -> m ()
-rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
-
--- | Check the current value of a given reference.
-(==>) :: (Eq a, Show a, MonadRegisterRun m, EffectM m ~ Prog (AsocT m)) => Ref m a -> a -> m ()
-r ==> v = readRef r >>= (==? v)
-
-infix 0 ==>, ==?
-
 
 
 
