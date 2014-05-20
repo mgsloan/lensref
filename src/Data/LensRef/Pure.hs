@@ -44,71 +44,72 @@ newtype instance RefWriterOf (ReaderT s m) a
 
 ----------------------
 
-newtype Lens_ a b = Lens_ {unLens_ :: Lens' a b}
+newtype WrappedLens a b = WrappedLens {unwrapLens :: Lens' a b}
 
-runLens_ :: Reader a (Lens_ a b) -> Lens' a b
-runLens_ r f a = unLens_ (runReader r a) f a
+joinLens :: Reader a (WrappedLens a b) -> Lens' a b
+joinLens r f a = unwrapLens (runReader r a) f a
 
-type LSt = [CC]
+type AllReferenceState = [ReferenceState]
 
-data CC = forall a . CC (LSt -> a -> a) a
+data ReferenceState where
+    ReferenceState :: (AllReferenceState -> a -> a) -> a -> ReferenceState
 
-initLSt :: LSt
+initLSt :: AllReferenceState
 initLSt = empty
 
-instance MonadRefReader (Reader LSt) where
-    type BaseRef (Reader LSt) = Lens_ LSt
+instance MonadRefReader (Reader AllReferenceState) where
+    type BaseRef (Reader AllReferenceState) = WrappedLens AllReferenceState
     liftRefReader = id
 
-instance Monad m => MonadRefReader (RefWriterOf (ReaderT LSt m)) where
-    type BaseRef (RefWriterOf (ReaderT LSt m)) = Lens_ LSt
+instance Monad m => MonadRefReader (RefWriterOf (ReaderT AllReferenceState m)) where
+    type BaseRef (RefWriterOf (ReaderT AllReferenceState m)) = WrappedLens AllReferenceState
     liftRefReader = RefWriterOfReaderT . gets . runReader
 
-instance MonadRefWriter (RefWriterOf (Reader LSt)) where
+instance MonadRefWriter (RefWriterOf (Reader AllReferenceState)) where
     liftRefWriter = id
 
-instance RefClass (Lens_ LSt) where
-    type RefReaderSimple (Lens_ LSt) = Reader LSt
+instance RefClass (WrappedLens AllReferenceState) where
+    type RefReaderSimple (WrappedLens AllReferenceState) = Reader AllReferenceState
 
-    readRefSimple r = view $ runLens_ r
-    writeRefSimple r a = runLens_ r .= a
-    lensMap l r = return $ Lens_ $ runLens_ r . l
-    unitRef = return $ Lens_ united
+    readRefSimple r = view $ joinLens r
+    writeRefSimple r a = joinLens r .= a
+    lensMap l r = return $ WrappedLens $ joinLens r . l
+    unitRef = return $ WrappedLens united
 
-instance Monad m => MonadRefReader (StateT LSt m) where
-    type BaseRef (StateT LSt m) = Lens_ LSt
+instance Monad m => MonadRefReader (StateT AllReferenceState m) where
+    type BaseRef (StateT AllReferenceState m) = WrappedLens AllReferenceState
 
     liftRefReader = gets . runReader
 
-instance Monad m => MonadRefCreator (StateT LSt m) where
+instance Monad m => MonadRefCreator (StateT AllReferenceState m) where
     extRef r r2 a0 = state extend
       where
-        rk = set (runLens_ r) . (^. r2)
-        kr = set r2 . (^. runLens_ r)
+        rk = set (joinLens r) . (^. r2)
+        kr = set r2 . (^. joinLens r)
 
-        extend x0 = (return $ Lens_ $ lens get set, x0 ++ [CC kr (kr x0 a0)])
+        extend x0 = (return $ WrappedLens $ lens get set, x0 ++ [ReferenceState kr (kr x0 a0)])
           where
             limit = splitAt (length x0)
 
             get = unsafeData . head . snd . limit
 
-            set x a = foldl (\x -> (x++) . (:[]) . ap_ x) (rk a zs ++ [CC kr a]) ys where
+            set x a = foldl (\x -> (x++) . (:[]) . ap_ x) (rk a zs ++ [ReferenceState kr a]) ys where
                 (zs, _ : ys) = limit x
 
-        ap_ :: LSt -> CC -> CC
-        ap_ x (CC f a) = CC f (f x a)
+        ap_ :: AllReferenceState -> ReferenceState -> ReferenceState
+        ap_ x (ReferenceState f a) = ReferenceState f (f x a)
 
-        unsafeData :: CC -> a
-        unsafeData (CC _ a) = unsafeCoerce a
+        unsafeData :: ReferenceState -> a
+        unsafeData (ReferenceState _ a) = unsafeCoerce a
 
 
-instance Monad m => MonadMemo (StateT LSt m) where
+instance Monad m => MonadMemo (StateT AllReferenceState m) where
     memoRead = memoRead_
 
---instance MonadMemo (RefWriterOf (Reader LSt)) where
+--instance MonadMemo (RefWriterOf (Reader AllReferenceState)) where
 --    memoRead = memoRead_
 
-instance Monad m => MonadRefWriter (StateT LSt m) where
+instance Monad m => MonadRefWriter (StateT AllReferenceState m) where
     liftRefWriter = state . runState . runRefWriterOfReaderT
 
 
@@ -125,7 +126,7 @@ newtype Register n a
     = Register { unRegister :: ReaderT (SLSt n () -> n (), RegRef (SLSt n)) (SLSt n) a }
         deriving (Monad, Applicative, Functor)
 
-type SLSt = StateT LSt
+type SLSt = StateT AllReferenceState
 {-
 mapReg :: (forall a . m a -> n a) -> Register m a -> Register n a
 mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
@@ -139,7 +140,7 @@ instance MonadFix m => MonadFix (Register m) where
 
 instance Monad m => MonadRefReader (Register m) where
 
-    type BaseRef (Register m) = Lens_ LSt
+    type BaseRef (Register m) = WrappedLens AllReferenceState
 
     liftRefReader = Register . lift . liftRefReader
 
