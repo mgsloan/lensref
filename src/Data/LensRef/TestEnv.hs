@@ -23,21 +23,6 @@ import Data.LensRef
 import Data.LensRef.Class
 import Data.LensRef.Common
 
-----------------------
-
-
-class MonadRegister tm => MonadRegisterRun tm where
-
-    type AsocT tm :: *
-
-    runReg :: (m ~ EffectM tm)
-        => m (AsocT tm)
-        -> (AsocT tm -> m ())
-        -> tm a
-        -> m (a, m ())
-
-
-
 --------------------------
 
 newtype Id = Id Int deriving Eq

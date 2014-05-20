@@ -251,22 +251,15 @@ toSend rb b0 c0 fb = do
 
 ------------------------
 
-#ifdef __TESTS__
-instance MonadRegisterRun (Register (Prog TP)) where
-
-    type AsocT (Register (Prog TP)) = TP
-
-    runReg r w m = runRegister_ (liftM unTP r) (w . TP) m
-
-newtype TP = TP { unTP :: SLSt (Prog TP) () }
-
 runTests :: IO ()
+#ifdef __TESTS__
 runTests = tests runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name (TP . lift) runReg
+runTest name = runTest_ name (TP . lift) $ \r w -> runRegister_ (liftM unTP r) (w . TP)
+
+newtype TP = TP { unTP :: SLSt (Prog TP) () }
 #else
-runTests :: IO ()
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
 
