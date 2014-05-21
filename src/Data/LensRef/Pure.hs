@@ -21,6 +21,7 @@ module Data.LensRef.Pure
 import Data.Monoid
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Lens.Simple
 
@@ -112,11 +113,12 @@ instance (Monad m, Applicative m) => MonadRefWriter (StateT AllReferenceState m)
 -- Ref-based WriterT
 type RefWriterT w m = ReaderT (Ref m w) m
 
-runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)
+runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, w)
 runRefWriterT m = do
     r <- newRef mempty
     a <- runReaderT m r
-    pure (a, r)
+    v <- readRef r
+    pure (a, v)
 
 tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
 tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
@@ -211,8 +213,8 @@ toSend
     -> (b -> b -> c -> {-Either (Register m c)-} Register_ m (c -> Register_ m c))
     -> Register_ m (RefReader m c)
 toSend rb b0 c0 fb = do
-    let doit st = readRef st >>= runMonadMonoid . fst
-        reg st msg = readRef st >>= runMonadMonoid . ($ msg) . snd
+    let doit = runMonadMonoid . fst
+        reg (_, st) = runMonadMonoid . st
 
     memoref <- lift $ do
         b <- liftRefReader rb
