@@ -12,6 +12,7 @@
 module Data.LensRef.Common where
 
 import Data.Monoid
+import Control.Applicative
 import Control.Concurrent
 import Control.Monad.State
 import Control.Monad.Writer
@@ -19,27 +20,18 @@ import Control.Monad.Reader
 
 import Data.LensRef.Class
 
-----------------
-
--- Ref-based WriterT
-type RefWriterT w m = ReaderT (Ref m w) m
-
-runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)
-runRefWriterT m = do
-    r <- newRef mempty
-    a <- runReaderT m r
-    return (a, r)
-
-tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
-tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
-
 -------------
 
-newtype MonadMonoid a = MonadMonoid { runMonadMonoid :: a () }
+newtype MonadMonoid m a = MonadMonoid
+    { runMonadMonoid :: m a }
+        deriving (Monad, Applicative, Functor)
 
-instance Monad m => Monoid (MonadMonoid m) where
-    mempty = MonadMonoid $ return ()
-    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ a >> b
+instance MonadTrans MonadMonoid where
+    lift = MonadMonoid
+
+instance (Monad m, Monoid a) => Monoid (MonadMonoid m a) where
+    mempty = MonadMonoid $ return mempty
+    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ liftM2 mappend a b
 
 
 ------------------------
@@ -48,7 +40,7 @@ newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
 
 type SRef m a = Morph (StateT a m) m
 
-class Monad m => NewRef m where
+class (Monad m, Applicative m) => NewRef m where
     newRef' :: a -> m (SRef m a)
 {-
 instance Monad m => NewRef (StateT LSt m) where

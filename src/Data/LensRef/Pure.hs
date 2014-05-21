@@ -1,4 +1,3 @@
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -6,8 +5,6 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
 -- {-# OPTIONS_HADDOCK hide #-}
 {- |
@@ -54,8 +51,8 @@ type AllReferenceState = [ReferenceState]
 data ReferenceState where
     ReferenceState :: (AllReferenceState -> a -> a) -> a -> ReferenceState
 
-initLSt :: AllReferenceState
-initLSt = empty
+initAllReferenceState :: AllReferenceState
+initAllReferenceState = []
 
 instance MonadRefReader (Reader AllReferenceState) where
     type BaseRef (Reader AllReferenceState) = WrappedLens AllReferenceState
@@ -113,18 +110,28 @@ instance Monad m => MonadRefWriter (StateT AllReferenceState m) where
     liftRefWriter = state . runState . runRefWriterOfReaderT
 
 
+----------------
+
+-- Ref-based WriterT
+type RefWriterT w m = ReaderT (Ref m w) m
+
+runRefWriterT :: (MonadRefCreator m, Monoid w) => RefWriterT w m a -> m (a, Ref m w)
+runRefWriterT m = do
+    r <- newRef mempty
+    a <- runReaderT m r
+    return (a, r)
+
+tell' :: (Monoid w, MonadRefCreator m, MonadRefWriter m) => w -> RefWriterT w m ()
+tell' w = ReaderT $ \m -> readRef m >>= writeRef m . (`mappend` w)
+
 ---------------------------------
 
-
-type Register_ m
-    = ReaderT (Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid m)) m
-
 type RegRef m
-    = Ref m (MonadMonoid m, RegionStatusChange -> MonadMonoid m)
+    = Ref m (MonadMonoid m (), RegionStatusChange -> MonadMonoid m ())
 
 newtype Register n a
     = Register { unRegister :: ReaderT (SLSt n () -> n (), RegRef (SLSt n)) (SLSt n) a }
-        deriving (Monad, Applicative, Functor)
+        deriving (Monad, Applicative, Functor, MonadFix)
 
 type SLSt = StateT AllReferenceState
 {-
@@ -134,9 +141,6 @@ mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s 
 -}
 instance MonadTrans Register where
     lift = Register . lift . lift
-
-instance MonadFix m => MonadFix (Register m) where
-    mfix f = Register $ mfix $ unRegister . f
 
 instance Monad m => MonadRefReader (Register m) where
 
@@ -157,15 +161,17 @@ instance Monad m => MonadMemo (Register m) where
 instance Monad n => MonadRefWriter (Register n) where
     liftRefWriter = Register . lift . liftRefWriter
 
-instance Monad n => MonadRegister (Register n) where
+instance Monad n => MonadEffect (Register n) where
 
     type EffectM (Register n) = n
 
     liftEffectM = lift
 
+instance Monad n => MonadRegister (Register n) where
+
     type Modifier (Register n) = Register n
 
-    liftToModifier = id
+--    liftToModifier = id
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
@@ -174,8 +180,7 @@ instance Monad n => MonadRegister (Register n) where
         return $ fmap (fst st . evalRegister st) f
 
     onRegionStatusChange g = Register $ do
-        st <- ask
-        magnify _2 $ tell' (mempty, MonadMonoid . evalRegister st . g)
+        magnify _2 $ tell' (mempty, MonadMonoid . lift . g)
 
 evalRegister' ff (Register m) = ReaderT $ \s -> runReaderT m (ff, s)
 
@@ -189,7 +194,7 @@ runRegister newChan m = do
 
 runRegister_ :: Monad m => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Register m) = do
-    ((a, tick), s) <- flip runStateT initLSt $ do
+    ((a, tick), s) <- flip runStateT initAllReferenceState $ do
         r <- newRef mempty
         a <- runReaderT m (write, r)
         (w, _) <- readRef r
@@ -205,6 +210,8 @@ onChangeAcc r b0 c0 f = Register $ do
     ff <- asks fst
     magnify _2 $ toSend r b0 c0 $ \b b' c' -> liftM (\x -> evalRegister' ff . x) $ evalRegister' ff $ f b b' c'
 
+type Register_ m
+    = ReaderT (RegRef m) m
 
 toSend
     :: (Eq b, MonadRefCreator m, MonadRefWriter m)

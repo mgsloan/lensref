@@ -50,13 +50,17 @@ type Prog t = ProgramT (Inst t) (State (Seq.Seq Any))
 instance NewRef (Prog t) where
     newRef' = singleton . NewRef
 
-message :: (MonadRegister m, EffectM m ~ Prog t) => String -> m ()
+instance MonadEffect (Prog t) where
+    type EffectM (Prog t) = Prog t
+    liftEffectM = id
+
+message :: (MonadEffect m, EffectM m ~ Prog t) => String -> m ()
 message = liftEffectM . singleton . Message
 
 infix 0 ==?
 
 -- | Check an equality.
-(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (Modifier m)) => a -> a -> m ()
+--(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (Modifier m)) => a -> a -> m ()
 rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
 
 
@@ -66,7 +70,7 @@ listen i m = do
     id <- liftEffectM . singleton $ Listen i f
     message $ "listener " ++ show id
     onRegionStatusChange $ \s -> do
-        liftEffectM . singleton $ SetStatus id s
+        liftEffectM $ singleton $ SetStatus id s
         when (s == Kill) $ message $ show s ++ " " ++ show id
 
 

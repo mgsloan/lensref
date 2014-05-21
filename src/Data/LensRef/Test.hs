@@ -20,7 +20,7 @@ import Data.LensRef.TestEnv
 -----------------------------------------------------------------
 
 -- | Look inside the sources for the tests.
-tests :: (MonadRegister m, MonadRefWriter m, EffectM m ~ Prog k, MonadRegister (Modifier m), Monad n)
+tests :: (MonadRegister m, MonadRefWriter m, EffectM m ~ Prog k, {- MonadRegister (Modifier m), -} Monad n)
     => (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()
 
@@ -268,7 +268,7 @@ tests runTest = do
             send 1 "f"
             message' "Hello f"
     --                send 2 "f"
-
+{-
     runTest "listeners" (do
         listen 1 $ \s -> message $ "Hello " ++ s
         listen 2 $ \s -> message $ "Hi " ++ s
@@ -292,10 +292,20 @@ tests runTest = do
             message' "listener #3"
             send 4 "f"
             message' "H f"
-
+-}
     runTest "postponed0" (postponeModification $ message "hello") $ do
         return $ (,) () $ do
             message' "hello"
+
+    runTest "postponed-write" (do
+        r <- newRef "x"
+        _ <- onChange (readRef r) message
+        postponeModification $ writeRef r "y"
+        return ()
+            ) $ do
+        message' "x"
+        return $ (,) () $ do
+            message' "y"
 
     runTest "postponed" (do
         r <- newRef "x"
@@ -417,8 +427,8 @@ tests runTest = do
             message' "Kill #2"
             send 2 "f"
             message' "Hi f"
-{-
-    runTest "" (do
+
+    runTest "bla2" (do
         r <- newRef $ Just (3 :: Int)
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
@@ -439,8 +449,60 @@ tests runTest = do
             message' "Just 1"
             message' "(True,1)"
             return ()
--}
+{-
+    runTest "listen-listen" (do
+        listen 1 $ \s -> case s of
+            "x" -> listen 2 message
+            _ -> return ()
+        ) $ do
+        message' "listener #0"
+        return $ (,) () $ do
+            send 1 "d"
+            send 2 "hi"
+            error' "message is not received: 2 \"hi\""
+            send 1 "d"
+            send 1 "x"
+            message' "listener #1"
+            send 2 "hi"
+            message' "hi"
+            send 1 "x"
+            message' "listener #2"
+            send 2 "hi"
+            message' "hi"
+            message' "hi"
+            send 2 "hi"
+            message' "hi"
+            message' "hi"
+            send 1 "d"
+            send 2 "hi"
+            message' "hi"
+            message' "hi"
+            send 1 "x"
+            message' "listener #3"
+            send 2 "hi"
+            message' "hi"
+            message' "hi"
+            message' "hi"
 
+    runTest "listen-onChange" (do
+        r <- newRef "k"
+        listen 1 $ \s -> case s of
+            "x" -> onChange (readRef r) message >> return ()
+            _ -> writeRef r s
+        ) $ do
+        message' "listener #0"
+        return $ (,) () $ do
+            send 1 "d"
+            send 1 "x"
+            message' "d"
+            send 1 "d"
+            send 1 "e"
+            send 1 "x"
+            message' "e"
+--            message' "x"
+            send 1 "f"
+--            message' "f"
+-}        
 
 -------------------------- auxiliary definitions
 

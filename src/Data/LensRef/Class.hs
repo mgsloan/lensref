@@ -21,9 +21,13 @@ module Data.LensRef.Class
     , RefReader
     , RefWriter
 
+    -- * Effects
+    , MonadEffect (..)
+
     -- * Dynamic networks
     , MonadRegister (..)
     , RegionStatusChange (..)
+    , RegionStatusChangeHandler
 
     -- * Other
     , MonadMemo (..)
@@ -187,9 +191,21 @@ class Monad m => MonadMemo m where
     future :: (RefReader m a -> m a) -> m a
 -}
 
+-- | TODO
+class (Monad (EffectM m)) => MonadEffect m where
+
+    type EffectM m :: * -> *
+
+    liftEffectM :: EffectM m a -> m a
+
+
 -- | Monad for dynamic actions
-class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier m), BaseRef (Modifier m) ~ BaseRef m, Monad (EffectM m),
-    {- MonadRegister (Modifier m), -}EffectM (Modifier m) ~ EffectM m, Modifier (Modifier m) ~ Modifier m)
+class ( MonadEffect m, MonadRefCreator m
+      , MonadRefWriter (Modifier m), MonadEffect (Modifier m)
+--      , MonadRefCreator (Modifier m)
+      , BaseRef (Modifier m) ~ BaseRef m
+      , EffectM (Modifier m) ~ EffectM m
+      )
     => MonadRegister m where
 {-
     onChangeAcc
@@ -199,22 +215,20 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
         -> (b -> b -> c -> m (c -> m c))
         -> m (RefReader m c)
 -}
+--    onChange :: Eq a => RefReader m a -> m a
+
     onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
     onChange r f = onChangeMemo r $ return . f
 
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
 --    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
 
-    onRegionStatusChange :: (RegionStatusChange -> m ()) -> m ()
+    onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-
-    type EffectM m :: * -> *
-
-    liftEffectM :: EffectM m a -> m a
 
     type Modifier m :: * -> *
 
-    liftToModifier :: m a -> Modifier m a
+--    liftToModifier :: m a -> Modifier m a
 
     registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
 
@@ -225,5 +239,8 @@ class (MonadRefCreator m, MonadRefWriter (Modifier m), MonadRefCreator (Modifier
 
 -- | TODO
 data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
+
+-- | TODO
+type RegionStatusChangeHandler m = RegionStatusChange -> m ()
 
 
