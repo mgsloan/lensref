@@ -9,6 +9,7 @@ module Data.LensRef.Test
     ) where
 
 import Data.Maybe
+import Control.Applicative
 import Control.Monad
 import Control.Arrow ((***))
 import Control.Lens
@@ -26,7 +27,7 @@ tests :: (MonadRegister m, MonadRefWriter m, EffectM m ~ Prog k, {- MonadRegiste
 
 tests runTest = do
 
-    let runTestSimple name t = runTest name t $ return ((), return ())
+    let runTestSimple name t = runTest name t $ pure ((), pure ())
 
     let r ==> v = readRef r >>= (==? v)
 
@@ -218,12 +219,12 @@ tests runTest = do
         q ==> [3]
 
     let
-        perform m = m >>= maybe (return ()) liftRefWriter
+        perform m = m >>= maybe (pure ()) liftRefWriter
         m === t = m >>= \x -> isJust x ==? t
 
     runTestSimple "undoTest3" $ do
         r <- newRef (3 :: Int)
-        (undo, redo) <- liftM (liftRefReader *** liftRefReader) $ undoTr (==) r
+        (undo, redo) <- fmap (liftRefReader *** liftRefReader) $ undoTr (==) r
         r ==> 3
         redo === False
         undo === False
@@ -253,16 +254,16 @@ tests runTest = do
         undo === True
 
 
-    runTest "trivial" (return ()) $ do
-        return ((), return ())
+    runTest "trivial" (pure ()) $ do
+        pure ((), pure ())
 
     runTest "message" (message "Hello") $ do
         message' "Hello"
-        return ((), return ())
+        pure ((), pure ())
 
     runTest "listener" (listen 1 $ \s -> message $ "Hello " ++ s) $ do
         message' "listener #0"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "d"
             message' "Hello d"
             send 1 "f"
@@ -280,7 +281,7 @@ tests runTest = do
         message' "listener #0"
         message' "listener #1"
         message' "listener #2"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "d"
             message' "Hello d"
             send 1 "f"
@@ -294,17 +295,17 @@ tests runTest = do
             message' "H f"
 -}
     runTest "postponed0" (postponeModification $ message "hello") $ do
-        return $ (,) () $ do
+        pure $ (,) () $ do
             message' "hello"
 
     runTest "postponed-write" (do
         r <- newRef "x"
         _ <- onChange (readRef r) message
         postponeModification $ writeRef r "y"
-        return ()
+        pure ()
             ) $ do
         message' "x"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             message' "y"
 
     runTest "postponed" (do
@@ -312,21 +313,21 @@ tests runTest = do
         _ <- onChange (readRef r) message
         postponeModification $ writeRef r "x"
         postponeModification $ writeRef r "y"
-        return ()
+        pure ()
             ) $ do
         message' "x"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             message' "y"
 
     runTest "onChange" (do
         r <- newRef "x"
         listen 1 $ writeRef r
         _ <- onChange (readRef r) message
-        return ()
+        pure ()
             ) $ do
         message' "listener #0"
         message' "x"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "x"
             send 1 "y"
             message' "y"
@@ -336,13 +337,13 @@ tests runTest = do
         r2 <- newRef "y"
         listen 1 $ writeRef r1
         listen 2 $ writeRef r2
-        _ <- onChange (liftM2 (++) (readRef r1) (readRef r2)) message
-        return ()
+        _ <- onChange (liftA2 (++) (readRef r1) (readRef r2)) message
+        pure ()
             ) $ do
         message' "listener #0"
         message' "listener #1"
         message' "xy"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "x"
             send 2 "y"
             send 1 "y"
@@ -361,13 +362,13 @@ tests runTest = do
             True  -> writeRef rr r1
             False -> writeRef rr r2
         _ <- onChange (readRef $ join $ readRef rr) message
-        return ()
+        pure ()
             ) $ do
         message' "listener #0"
         message' "listener #1"
         message' "listener #2"
         message' "x"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "x"
             send 2 "y"
             send 1 "y"
@@ -384,7 +385,7 @@ tests runTest = do
     runTest "bla" (do
         r <- newRef (0 :: Int)
         _ <- onChangeMemo (readRef r) $ \i -> case i of
-            0 -> return $ do
+            0 -> pure $ do
                 listen 1 $ \s -> do
                     when (s == "f") $ do
                         writeRef r 1
@@ -396,13 +397,13 @@ tests runTest = do
                 listen 2 $ \s -> do
                     when (s == "g") $ writeRef r 0
                     message $ "Hi " ++ s
-                return $ return ()
+                pure $ pure ()
 
-        return ()
+        pure ()
               ) $ do
 
         message' "listener #0"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "d"
             message' "Hello d"
             send 1 "f"
@@ -433,30 +434,29 @@ tests runTest = do
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
-        _ <- onChangeMemo (readRef r) $ \r -> return $ message $ show r
-        _ <- onChangeMemo (readRef q) $ \r -> return $ message $ show r
+        _ <- onChangeMemo (readRef r) $ \r -> pure $ message $ show r
+        _ <- onChangeMemo (readRef q) $ \r -> pure $ message $ show r
         postponeModification $ writeRef r Nothing
         postponeModification $ writeRef q1 True
         postponeModification $ writeRef q2 1
         ) $ do
         message' "Just 3"
         message' "(True,3)"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             message' "Nothing"
             message' "(False,3)"
             message' "Just 3"
             message' "(True,3)"
             message' "Just 1"
             message' "(True,1)"
-            return ()
 {-
     runTest "listen-listen" (do
         listen 1 $ \s -> case s of
             "x" -> listen 2 message
-            _ -> return ()
+            _ -> pure ()
         ) $ do
         message' "listener #0"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "d"
             send 2 "hi"
             error' "message is not received: 2 \"hi\""
@@ -487,11 +487,11 @@ tests runTest = do
     runTest "listen-onChange" (do
         r <- newRef "k"
         listen 1 $ \s -> case s of
-            "x" -> onChange (readRef r) message >> return ()
+            "x" -> onChange (readRef r) message >> pure ()
             _ -> writeRef r s
         ) $ do
         message' "listener #0"
-        return $ (,) () $ do
+        pure $ (,) () $ do
             send 1 "d"
             send 1 "x"
             message' "d"
@@ -520,8 +520,8 @@ undoTr
            )  -- ^ undo and redo actions
 undoTr eq r = do
     ku <- extRef r (undoLens eq) ([], [])
-    let try f = liftM (liftM (writeRefSimple ku) . f) $ readRef ku
-    return (try undo, try redo)
+    let try f = fmap (fmap (writeRefSimple ku) . f) $ readRef ku
+    pure (try undo, try redo)
   where
     undo (x: xs@(_:_), ys) = Just (xs, x: ys)
     undo _ = Nothing

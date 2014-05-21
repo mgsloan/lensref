@@ -11,6 +11,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Data.LensRef.TestEnv where
 
+import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer hiding (listen, Any)
 import Control.Monad.Operational
@@ -89,7 +90,7 @@ send i s = singleton $ Send i s
 getProg' :: Prog' b
     -> StateT s Er b
 getProg' p = case runIdentity . viewT $ p of
-    Return x -> return x
+    Return x -> pure x
     Send i s :>>= p -> do
         fail' $ "end expected instead of send " ++ show i ++ " " ++ show s
         getProg' $ p ()
@@ -158,8 +159,8 @@ coeval__ lift_ op p = do
         coeval__ lift_ op $ k ()
 
     (Message s :>>= k, Return x) -> do
-        fail' $ "the following message expected: " ++ s ++ " instead of return"
-        coeval_ lift_ (k ()) (return x)
+        fail' $ "the following message expected: " ++ s ++ " instead of pure"
+        coeval_ lift_ (k ()) (pure x)
 
     (Message s :>>= k, Message' s' :>>= k')
         | s == s' -> do
@@ -210,7 +211,7 @@ coeval__ lift_ op p = do
                   Any w -> do
                     (x, w') <- f $ unsafeCoerce w
                     modify $ Seq.update n $ Any w'
-                    return x
+                    pure x
         vars %= (Seq.|> Any a)
         coeval_ lift_ (k $ Morph $ ff a) p
 
@@ -228,9 +229,9 @@ coeval__ lift_ op p = do
                 postponed %= (++ li')
         coeval__ lift_ op (k ())
 
-    (ReadI :>>= _, _) | nopostponed -> return (Nothing, p)
+    (ReadI :>>= _, _) | nopostponed -> pure (Nothing, p)
 
-    (Return x, _) -> return (Just x, p)
+    (Return x, _) -> pure (Just x, p)
 
 
 
@@ -248,7 +249,7 @@ runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT
     (_, pr) <- coeval_ lift c p
     getProg' pr
 
-showError [] = return ()
+showError [] = pure ()
 showError xs = fail $ "\n" ++ unlines xs
 
 

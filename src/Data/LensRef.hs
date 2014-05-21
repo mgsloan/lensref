@@ -48,7 +48,7 @@ module Data.LensRef
 -}
     ) where
 
---import Control.Monad
+import Control.Applicative
 import Control.Monad.Identity
 import Control.Lens.Simple (set)
 
@@ -76,7 +76,7 @@ r `modRef` f = readRef r >>= writeRef r . f
 class RefClass r => EqRefClass r where
     valueIsChanging :: RefSimple r a -> RefReaderSimple r (a -> Bool)
 
-{- | @hasEffect r f@ returns @False@ iff @(modRef m f)@ === @(return ())@.
+{- | @hasEffect r f@ returns @False@ iff @(modRef m f)@ === @(pure ())@.
 
 @hasEffect@ is correct only if @toEqRef@ is applied on a pure reference (a reference which is a pure lens on the hidden state).
 
@@ -87,10 +87,7 @@ hasEffect
     => RefSimple r a
     -> (a -> a)
     -> RefReaderSimple r Bool
-hasEffect r f = do
-    a <- readRef r
-    ch <- valueIsChanging r
-    return $ ch $ f a
+hasEffect r f = valueIsChanging r <*> (f <$> readRef r)
 
 
 -- | TODO
@@ -102,7 +99,7 @@ data EqRefCore r a = EqRefCore (r a) (a -> Bool{-changed-})
 
 As a reference, @(m :: EqRefSimple r a)@ behaves as
 
-@join $ liftM (uncurry lensMap) m@
+@join $ fmap (uncurry lensMap) m@
 -}
 type EqRefSimple r a = RefReaderSimple r (EqRefCore r a)
 
@@ -112,26 +109,21 @@ type EqRef m a = EqRefSimple (BaseRef m) a
 {- | @EqRefSimple@ construction.
 -}
 toEqRef :: (RefClass r, Eq a) => RefSimple r a -> EqRefSimple r a
-toEqRef r = do
-    a <- readRef r
-    r_ <- r
-    return $ EqRefCore r_ (/= a)
+toEqRef r = EqRefCore <$> r <*> ((/=) <$> readRef r)
 
 -- | TODO
 newEqRef :: (MonadRefCreator m, Eq a) => a -> m (EqRef m a) 
-newEqRef = liftM toEqRef . newRef
+newEqRef = fmap toEqRef . newRef
 
 {- | An @EqRefSimple@ is a normal reference if we forget about the equality.
 
-@fromEqRef m@ === @join $ liftM (uncurry lensMap) m@
+@fromEqRef m@ === @join $ fmap (uncurry lensMap) m@
 -}
 fromEqRef :: RefClass r => EqRefSimple r a -> RefSimple r a
-fromEqRef m = m >>= \(EqRefCore r _) -> return r
+fromEqRef m = (\(EqRefCore r _) -> r) <$> m
 
 instance RefClass r => EqRefClass (EqRefCore r) where
-    valueIsChanging m = do
-        EqRefCore _r k <- m
-        return k
+    valueIsChanging m = (\(EqRefCore _r k) -> k) <$> m
 
 instance RefClass r => RefClass (EqRefCore r) where
 
@@ -141,11 +133,8 @@ instance RefClass r => RefClass (EqRefCore r) where
 
     writeRefSimple = writeRefSimple . fromEqRef
 
-    lensMap l m = do
-        a <- readRef m
-        EqRefCore r k <- m
-        lr <- lensMap l $ return r
-        return $ EqRefCore lr $ \b -> k $ set l b a
+    lensMap l m = (>>=) m $ \(EqRefCore r k) ->
+        EqRefCore <$> (lensMap l $ pure r) <*> ((\a b -> k $ set l b a)  <$> readRef m)
 
     unitRef = toEqRef unitRef
 
@@ -165,23 +154,23 @@ instance RefClass r => RefClass (CorrBaseRef r) where
     lensMap l m = do
         a <- readRef m
         CorrBaseRef r k <- m
-        lr <- lensMap l $ return r
-        return $ CorrBaseRef lr $ \b -> fmap (^. l) $ k $ set l b a
+        lr <- lensMap l $ pure r
+        pure $ CorrBaseRef lr $ \b -> fmap (^. l) $ k $ set l b a
 
     unitRef = corrRef (const Nothing) unitRef
 
 fromCorrRef :: RefClass r => CorrRef r a -> RefSimple r a
-fromCorrRef m = m >>= \(CorrBaseRef r _) -> return r
+fromCorrRef m = m >>= \(CorrBaseRef r _) -> pure r
 
 corrRef :: RefClass r => (a -> Maybe a) -> RefSimple r a -> CorrRef r a
 corrRef f r = do
     r_ <- r
-    return $ CorrBaseRef r_ f
+    pure $ CorrBaseRef r_ f
 
 correction :: RefClass r => CorrRef r a -> RefReaderSimple r (a -> Maybe a)
 correction r = do
     CorrBaseRef _ f <- r
-    return f
+    pure f
 -}
 
 

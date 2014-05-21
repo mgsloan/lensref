@@ -47,7 +47,7 @@ data RefReaderT m a = RefReaderT
 
 refReaderT m = RefReaderT
     { value = m
-    , registerOnChange = firstTime $ const $ return $ const $ return ()
+    , registerOnChange = firstTime $ const $ pure $ const $ pure ()
     }
 
 firstTime f y = do
@@ -63,8 +63,13 @@ instance Functor m => Functor (RefReaderT m) where
         }
 
 instance NewRef m => Applicative (RefReaderT m) where
-    pure a = refReaderT $ return a
-    mf <*> ma = liftM2 ($) mf ma -- TODO: optimize this
+    pure a = refReaderT $ pure a
+    mf <*> ma = RefReaderT
+        { value = value mf <*> value ma
+        , registerOnChange = liftA2 f (registerOnChange mf) (registerOnChange ma)
+        }
+      where
+        f (WriterT m1) (WriterT m2) = WriterT $ liftA2 mappend m1 m2
 
 instance NewRef m => Monad (RefReaderT m) where
 
@@ -73,13 +78,13 @@ instance NewRef m => Monad (RefReaderT m) where
     mr >>= f = RefReaderT
         { value = value mr >>= value . f
         , registerOnChange = \action -> do
-            r <- lift $ newRef' $ const $ return ()
+            r <- lift $ newRef' $ const $ pure ()
             registerOnChange mr $ do
                 v <- value mr
                 runMorph r $ StateT $ \innerhandler -> do
                     runMonadMonoid $ innerhandler Kill
                     newinnerhandler <- execWriterT $ registerOnChange (f v) action
-                    return ((), newinnerhandler)
+                    pure ((), newinnerhandler)
             tell $ \inst -> do
                 innerhandler <- lift $ runMorph r get
                 innerhandler inst
@@ -140,9 +145,9 @@ instance NewRef m => RefClass (RefCore_ m) where
             , writePart = \b -> liftRefReader r >>= w . set k b
             }
 
-    unitRef = return RefCore_
-                { readPart  = return ()
-                , writePart = const $ return ()
+    unitRef = pure RefCore_
+                { readPart  = pure ()
+                , writePart = const $ pure ()
                 }
 
 
@@ -168,8 +173,8 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
                 join $ runMorph rqueue $ gets $ sequence_ . queueElems
                 runMorph status $ put True
 
-        return $
-            return RefCore_
+        pure $
+            pure RefCore_
                 { readPart = RefReaderT
                     { value = runMorph ra get
                     , registerOnChange = firstTime $ runMorph rqueue . state . addElem' rqueue
@@ -187,7 +192,7 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
 newRef_ a0 = do
     ra <- newRef' a0
     rqueue <- newRef' emptyQueue
-    return $ return RefCore_
+    pure $ pure RefCore_
             { readPart = RefReaderT
                 { value = runMorph ra get
                 , registerOnChange = firstTime $ runMorph rqueue . state . addElem' rqueue
@@ -199,7 +204,7 @@ newRef_ a0 = do
 
 addElem' r a q = f *** id $ addElem a q where
     f (_, del) inst = MonadMonoid $ do
-        as <- runMorph r $ StateT $ \s -> return $ del inst s
+        as <- runMorph r $ StateT $ \s -> pure $ del inst s
         sequence_ as
 
 
@@ -214,7 +219,7 @@ queueElems = map snd . filter fst . map snd . snd
 mapMQueue :: (Monad m) => (a -> m b) -> Queue a -> m (Queue b)
 mapMQueue f (j, xs) = do
     vs <- mapM (f . snd) xs
-    return (j, zip (map fst xs) vs)
+    pure (j, zip (map fst xs) vs)
 -}
 addElem :: a -> Queue a -> ((Queue a -> a, RegionStatusChange -> Queue a -> ([a], Queue a)), Queue a)
 addElem a (i, as) = ((getElem i, delElem i), (i+1, (i,(True,a)):as))
@@ -286,7 +291,7 @@ instance NewRef m => MonadRegister (Register m) where
                 v <- value mr
                 (vold, (h1_, _)) <- value $ readRefSimple nr
                 if v == vold
-                  then return ()
+                  then pure ()
                   else do
                     runMonadMonoid $ h1_ Kill
                     (y, h1) <- runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ f v
@@ -295,7 +300,7 @@ instance NewRef m => MonadRegister (Register m) where
         registerOnChange mr $ do
             runMorph (snd st) $ modify (`mappend` MonadMonoid ev)
 
-        return $ readRef $ (_2 . _2) `lensMap` nr
+        pure $ readRef $ (_2 . _2) `lensMap` nr
 
     onChangeMemo mr f = Reg $ ReaderT $ \st -> RefCreatorT $ do
         v <- lift $ value mr
@@ -308,7 +313,7 @@ instance NewRef m => MonadRegister (Register m) where
                 (la@(vold, ((_, h1_, h2_), _)), others) <- value $ readRefSimple nr
                 let others' = la: others
                 if v == vold
-                  then return ()
+                  then pure ()
                   else do
                     runMonadMonoid $ h1_ Block
                     runMonadMonoid $ h2_ Kill
@@ -325,11 +330,11 @@ instance NewRef m => MonadRegister (Register m) where
         registerOnChange mr $ do
             runMorph (snd st) $ modify (`mappend` MonadMonoid ev)
 
-        return $ readRef $ (_1 . _2 . _2) `lensMap` nr
+        pure $ readRef $ (_1 . _2 . _2) `lensMap` nr
 
     registerCallback f = Reg $ ReaderT $ \(st, _) -> do
         let g = st . runRefWriterT
-        return $ fmap g f
+        pure $ fmap g f
 
     onRegionStatusChange g = Reg $ ReaderT $ \_ -> do
         RefCreatorT $ tell $ MonadMonoid . g
@@ -346,8 +351,8 @@ runRegister_ read write (Reg m) = do
     (a, tick) <- do
         r <- newRef' mempty
         a <- fmap fst $ runWriterT $ runRefCreatorT $ runReaderT m (write, r)        -- fmap fst!!!
-        return (a, r)
-    return $ (,) a $ forever $ do
+        pure (a, r)
+    pure $ (,) a $ forever $ do
         join read
         k <- runMorph tick $ state $ \s -> (s, mempty)
         runMonadMonoid k
@@ -359,7 +364,7 @@ runTests :: IO ()
 runTests = tests runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name TP $ \r w -> runRegister_ (liftM unTP r) (w . TP)
+runTest name = runTest_ name TP $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
 newtype TP = TP { unTP :: Prog TP () }
 #else

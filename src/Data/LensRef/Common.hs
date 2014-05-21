@@ -29,9 +29,9 @@ newtype MonadMonoid m a = MonadMonoid
 instance MonadTrans MonadMonoid where
     lift = MonadMonoid
 
-instance (Monad m, Monoid a) => Monoid (MonadMonoid m a) where
-    mempty = MonadMonoid $ return mempty
-    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ liftM2 mappend a b
+instance (Applicative m, Monoid a) => Monoid (MonadMonoid m a) where
+    mempty = MonadMonoid $ pure mempty
+    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ liftA2 mappend a b
 
 
 ------------------------
@@ -46,29 +46,29 @@ class (Monad m, Applicative m) => NewRef m where
 instance Monad m => NewRef (StateT LSt m) where
     newRef' x = do
         v <- newRef x
-        return $ Morph $ \m -> do
+        pure $ Morph $ \m -> do
             x <- readRef v
             (y, x) <- runStateT m x
             writeRef v x
-            return y
+            pure y
 -}
 instance NewRef IO where
     newRef' x = do
         vx <- liftIO $ newMVar x
-        return $ Morph $ \m -> modifyMVar vx $ liftM swap . runStateT m
+        pure $ Morph $ \m -> modifyMVar vx $ fmap swap . runStateT m
       where
         swap (a, b) = (b, a)
 
 instance NewRef m => NewRef (StateT s m) where
-    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
-        Morph $ \m -> StateT $ \s -> runMorph r $ flip mapStateT m $ \k -> flip liftM (runStateT k s) $ \((x, w), s) -> ((x, s), w)
+    newRef' x = lift $ flip fmap (newRef' x) $ \r ->
+        Morph $ \m -> StateT $ \s -> runMorph r $ flip mapStateT m $ \k -> flip fmap (runStateT k s) $ \((x, w), s) -> ((x, s), w)
 
 instance (Monoid w, NewRef m) => NewRef (WriterT w m) where
-    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
-        Morph $ \m -> WriterT $ runMorph r $ flip mapStateT m $ \k -> flip liftM (runWriterT k) $ \((x, s), w) -> ((x, w), s)
+    newRef' x = lift $ flip fmap (newRef' x) $ \r ->
+        Morph $ \m -> WriterT $ runMorph r $ flip mapStateT m $ \k -> flip fmap (runWriterT k) $ \((x, s), w) -> ((x, w), s)
 
 instance NewRef m => NewRef (ReaderT r m) where
-    newRef' x = lift $ flip liftM (newRef' x) $ \r ->
+    newRef' x = lift $ flip fmap (newRef' x) $ \r ->
         Morph $ \m -> ReaderT $ \st -> runMorph r $ flip mapStateT m $ flip runReaderT st
 
 ---------------------------
@@ -83,25 +83,25 @@ future_ f = do
     s <- newRef $ error "can't see the future"
     a <- f $ readRef s
     writeRef s a
-    return a
+    pure a
 -}
 memoRead_ :: (MonadRefWriter m, MonadRefCreator m) => m a -> m (m a) 
 memoRead_ g = do
     s <- newRef Nothing
-    return $ readRef s >>= \x -> case x of
-        Just a -> return a
+    pure $ readRef s >>= \x -> case x of
+        Just a -> pure a
         _ -> g >>= \a -> do
             writeRef s $ Just a
-            return a
+            pure a
 
 {-
 memoWrite_ g = do
     s <- newRef Nothing
-    return $ \b -> readRef s >>= \x -> case x of
-        Just (b', a) | b' == b -> return a
+    pure $ \b -> readRef s >>= \x -> case x of
+        Just (b', a) | b' == b -> pure a
         _ -> g b >>= \a -> do
             writeRef s $ Just (b, a)
-            return a
+            pure a
 -}
 
 

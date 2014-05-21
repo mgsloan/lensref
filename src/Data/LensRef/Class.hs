@@ -34,6 +34,7 @@ module Data.LensRef.Class
     ) where
 
 
+import Control.Applicative
 import Control.Monad
 import Control.Lens.Simple (Lens', united)
 
@@ -63,8 +64,8 @@ class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), R
     @(RefReaderSimple m)@ is ismoroprhic to @('Reader' x)@ for some @x@.
     Laws which ensures this isomorphism (@(r :: RefReaderSimple m a)@ is arbitrary):
 
-    prop> r >> return ()  =  return ()
-    prop> liftM2 (,) r r  =  liftM (\a -> (a, a)) r
+    prop> r >> pure ()  =  pure ()
+    prop> liftA2 (,) r r  =  fmap (\a -> (a, a)) r
 
     See also <http://stackoverflow.com/questions/16123588/what-is-this-special-functor-structure-called>
     -}
@@ -95,7 +96,7 @@ type RefSimple r a = RefReaderSimple r (r a)
 infixr 8 `lensMap`
 
 -- | TODO
-class Monad m => MonadRefReader m where
+class (Applicative m, Monad m) => MonadRefReader m where
 
     -- | Base reference associated to the reference reader monad
     type BaseRef m :: * -> *
@@ -120,7 +121,7 @@ type Ref m a = RefSimple (BaseRef m) a
 
 
 -- | TODO
-class MonadRefReader m => MonadRefWriter m where
+class (Monad m, MonadRefReader m) => MonadRefWriter m where
 
     liftRefWriter :: RefWriter m a -> m a
 
@@ -138,7 +139,7 @@ create the same type of references in multiple monads.
 
 For basic usage examples, look into the source of @Data.LensRef.Test@.
 -}
-class (Monad m, RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRefCreator m where
+class (RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRefCreator m where
 
     {- | Reference creation by extending the state of an existing reference.
 
@@ -147,7 +148,7 @@ class (Monad m, RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRef
     Law 1: @extRef@ applies @k@ on @r@ backwards, i.e. 
     the result of @(extRef r k a0)@ should behaves exactly as @(lensMap k r)@.
 
-    prop> (liftM (k .) $ extRef r k a0)  =  return r
+    prop> (fmap (k .) $ extRef r k a0)  =  pure r
 
     Law 2: @extRef@ does not change the value of @r@:
 
@@ -168,19 +169,19 @@ class (Monad m, RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRef
 
 
 -- | TODO
-class Monad m => MonadMemo m where
+class (Monad m, Applicative m) => MonadMemo m where
     {- | Lazy monadic evaluation.
     In case of @y <- memoRead x@, invoking @y@ will invoke @x@ at most once.
 
     Laws:
 
-     *  @(memoRead x >> return ())@ === @return ()@
+     *  @(memoRead x >> pure ())@ === @pure ()@
 
      *  @(memoRead x >>= id)@ === @x@
 
-     *  @(memoRead x >>= \y -> liftM2 (,) y y)@ === @liftM (\a -> (a, a)) y@
+     *  @(memoRead x >>= \y -> liftA2 (,) y y)@ === @fmap (\a -> (a, a)) y@
 
-     *  @(memoRead x >>= \y -> liftM3 (,) y y y)@ === @liftM (\a -> (a, a, a)) y@
+     *  @(memoRead x >>= \y -> liftA3 (,) y y y)@ === @fmap (\a -> (a, a, a)) y@
 
      *  ...
     -}
@@ -192,7 +193,7 @@ class Monad m => MonadMemo m where
 -}
 
 -- | TODO
-class (Monad (EffectM m)) => MonadEffect m where
+class (Monad (EffectM m), Applicative (EffectM m)) => MonadEffect m where
 
     type EffectM m :: * -> *
 
@@ -218,10 +219,10 @@ class ( MonadEffect m, MonadRefCreator m
 --    onChange :: Eq a => RefReader m a -> m a
 
     onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
-    onChange r f = onChangeMemo r $ return . f
+    onChange r f = onChangeMemo r $ pure . f
 
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
---    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> liftM const $ f b
+--    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
