@@ -103,9 +103,6 @@ instance (Monad m, Applicative m) => MonadRefCreator (StateT AllReferenceState m
 instance (Monad m, Applicative m) => MonadMemo (StateT AllReferenceState m) where
     memoRead = memoRead_
 
---instance MonadMemo (RefWriterOf (Reader AllReferenceState)) where
---    memoRead = memoRead_
-
 instance (Monad m, Applicative m) => MonadRefWriter (StateT AllReferenceState m) where
     liftRefWriter = state . runState . runRefWriterOfReaderT
 
@@ -130,10 +127,10 @@ type RegRef m
     = Ref m (MonadMonoid m (), RegionStatusChange -> MonadMonoid m ())
 
 newtype Register n a
-    = Register { unRegister :: ReaderT (SLSt n () -> n (), RegRef (SLSt n)) (SLSt n) a }
+    = Register { unRegister :: ReaderT (RefM n () -> n (), RegRef (RefM n)) (RefM n) a }
         deriving (Monad, Applicative, Functor, MonadFix)
 
-type SLSt = StateT AllReferenceState
+type RefM = StateT AllReferenceState
 {-
 mapReg :: (forall a . m a -> n a) -> Register m a -> Register n a
 mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
@@ -143,9 +140,7 @@ instance MonadTrans Register where
     lift = Register . lift . lift
 
 instance (Monad m, Applicative m) => MonadRefReader (Register m) where
-
     type BaseRef (Register m) = WrappedLens AllReferenceState
-
     liftRefReader = Register . lift . liftRefReader
 
 instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
@@ -154,37 +149,30 @@ instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
 
 instance (Monad m, Applicative m) => MonadMemo (Register m) where
     memoRead = memoRead_
-{-
-    memoWrite = memoWrite_
-    future = future_
--}
+
 instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
     liftRefWriter = Register . lift . liftRefWriter
 
+instance (Monad m, Applicative m) => MonadEffect (RefM m) where
+    type EffectM (RefM m) = m
+    liftEffectM = lift
+
 instance (Monad m, Applicative m) => MonadEffect (Register m) where
-
     type EffectM (Register m) = m
-
     liftEffectM = lift
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
-    type Modifier (Register m) = Register m
-
---    liftToModifier = id
+    type Modifier (Register m) = RefM m
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
     registerCallback f = Register $ do
         st <- ask
-        pure $ fmap (fst st . evalRegister st) f
+        pure $ fmap (fst st) f
 
     onRegionStatusChange g = Register $ do
         magnify _2 $ tell' (mempty, MonadMonoid . lift . g)
-
-evalRegister' ff (Register m) = ReaderT $ \s -> runReaderT m (ff, s)
-
-evalRegister ff (Register m) = runReaderT m ff
 
 runRegister :: (Monad m, Applicative m) => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
@@ -192,7 +180,7 @@ runRegister newChan m = do
     runRegister_ read write m
 
 
-runRegister_ :: (Monad m, Applicative m) => m (SLSt m ()) -> (SLSt m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ :: (Monad m, Applicative m) => m (RefM m ()) -> (RefM m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Register m) = do
     ((a, tick), s) <- flip runStateT initAllReferenceState $ do
         r <- newRef mempty
@@ -209,6 +197,9 @@ runRegister_ read write (Register m) = do
 onChangeAcc r b0 c0 f = Register $ do
     ff <- asks fst
     magnify _2 $ toSend r b0 c0 $ \b b' c' -> fmap (\x -> evalRegister' ff . x) $ evalRegister' ff $ f b b' c'
+
+evalRegister' ff (Register m) = ReaderT $ \s -> runReaderT m (ff, s)
+
 
 type Register_ m
     = ReaderT (RegRef m) m
@@ -266,7 +257,7 @@ runTests = tests runTest
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
 runTest name = runTest_ name (TP . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
-newtype TP = TP { unTP :: SLSt (Prog TP) () }
+newtype TP = TP { unTP :: RefM (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
