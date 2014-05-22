@@ -119,15 +119,6 @@ newtype Register m a
     = Register { unRegister :: ReaderT (RefM m () -> m ()) (WriterT (ISt (RefM m)) (RefM m)) a }
         deriving (Monad, Applicative, Functor, MonadFix)
 
-{-
-mapReg :: (forall a . m a -> n a) -> Register m a -> Register n a
-mapReg ff (Register m) = Register $ ReaderT $ \f -> ReaderT $ \r -> StateT $ \s -> 
-    ff $ flip runStateT s $ flip runReaderT (iso undefined undefined `lensMap` r) $ runReaderT m $ undefined f
--}
-{-
-instance MonadTrans Register where
-    lift m = Register $ lift $ lift $ lift m
--}
 instance (Monad m, Applicative m) => MonadRefReader (Register m) where
     type BaseRef (Register m) = WrappedLens AllReferenceState
     liftRefReader = Register . lift . lift . liftRefReader
@@ -156,9 +147,7 @@ instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
-    registerCallback f = Register $ do
-        st <- ask
-        pure $ fmap st f
+    askPostpone = Register ask
 
     onRegionStatusChange g = Register $ tell (mempty, MonadMonoid . lift . g)
 

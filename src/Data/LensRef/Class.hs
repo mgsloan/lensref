@@ -35,7 +35,7 @@ module Data.LensRef.Class
 
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad.Reader
 import Control.Lens.Simple (Lens', united)
 
 --------------------------------
@@ -203,7 +203,6 @@ class (Monad (EffectM m), Applicative (EffectM m)) => MonadEffect m where
 -- | Monad for dynamic actions
 class ( MonadEffect m, MonadRefCreator m
       , MonadRefWriter (Modifier m), MonadEffect (Modifier m)
---      , MonadRefCreator (Modifier m)
       , BaseRef (Modifier m) ~ BaseRef m
       , EffectM (Modifier m) ~ EffectM m
       )
@@ -229,13 +228,12 @@ class ( MonadEffect m, MonadRefCreator m
 
     type Modifier m :: * -> *
 
---    liftToModifier :: m a -> Modifier m a
+    askPostpone :: m (Modifier m () -> EffectM m ())
 
     registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
-
---    unliftEffectM :: Functor f => f (m ()) -> m (f (EffectM m ()))
---    registerCallback_ :: Functor f => f (Modifier m ()) -> m (f (m ()))
---    registerCallback = registerCallback_ >=> unliftEffectM
+    registerCallback m = do
+        f <- askPostpone
+        pure $ fmap f m
 
 
 -- | TODO

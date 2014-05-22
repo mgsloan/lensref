@@ -349,9 +349,7 @@ instance NewRef m => MonadRegister (Register m) where
 
         pure $ readRef $ (_1 . _2 . _2) `lensMap` nr
 
-    registerCallback f = Reg $ ReaderT $ \(st, _, _) -> do
-        let g = st . runRefWriterT
-        pure $ fmap g f
+    askPostpone = Reg $ ReaderT $ \(st, _, _) -> pure $ st . runRefWriterT
 
     onRegionStatusChange g = Reg $ ReaderT $ \_ -> do
         RefCreatorT $ tell $ MonadMonoid . g
