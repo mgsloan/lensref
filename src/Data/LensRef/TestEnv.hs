@@ -67,8 +67,8 @@ rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++
 
 listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> Modifier m ()) -> m ()
 listen i m = do
-    f <- registerCallback m
-    id <- liftEffectM . singleton $ Listen i f
+    post <- askPostpone
+    id <- liftEffectM . singleton $ Listen i $ post . m
     message $ "listener " ++ show id
     onRegionStatusChange $ \s -> do
         liftEffectM $ singleton $ SetStatus id s

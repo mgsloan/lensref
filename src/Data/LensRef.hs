@@ -49,7 +49,6 @@ module Data.LensRef
     ) where
 
 import Control.Applicative
-import Control.Monad.Identity
 import Control.Lens.Simple (set)
 
 import Data.LensRef.Class
@@ -59,7 +58,7 @@ import Data.LensRef.Class
 
 -- | TODO
 postponeModification :: MonadRegister m => Modifier m () -> m ()
-postponeModification = liftEffectM . runIdentity <=< registerCallback . Identity
+postponeModification m = askPostpone >>= liftEffectM . ($ m)
 
 
 -- | @modRef r f@ === @readRef r >>= writeRef r . f@

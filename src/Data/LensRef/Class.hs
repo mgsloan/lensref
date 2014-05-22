@@ -225,15 +225,9 @@ class ( MonadEffect m, MonadRefCreator m
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-
     type Modifier m :: * -> *
 
     askPostpone :: m (Modifier m () -> EffectM m ())
-
-    registerCallback :: Functor f => f (Modifier m ()) -> m (f (EffectM m ()))
-    registerCallback m = do
-        f <- askPostpone
-        pure $ fmap f m
 
 
 -- | TODO
