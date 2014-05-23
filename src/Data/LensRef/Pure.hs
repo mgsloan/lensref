@@ -23,6 +23,7 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
+import Control.Monad.Identity
 import Control.Lens.Simple
 
 import Unsafe.Coerce
@@ -36,15 +37,15 @@ import Data.LensRef.Test
 
 ----------------------
 
-newtype instance RefWriterOf (ReaderT s m) a
-    = RefWriterOfReaderT { runRefWriterOfReaderT :: StateT s m a }
-        deriving (Monad, Applicative, Functor, MonadReader s, MonadState s)
+newtype instance RefWriterOf ReferenceReader a
+    = RefWriterOfReaderT { runRefWriterOfReaderT :: RefWriterT Identity a }
+        deriving (Monad, Applicative, Functor)
 
 ----------------------
 
-newtype WrappedLens a b = WrappedLens {unwrapLens :: Lens' a b}
+newtype Reference b = Reference {unwrapLens :: Lens' AllReferenceState b}
 
-joinLens :: Reader a (WrappedLens a b) -> Lens' a b
+joinLens :: ReferenceReader (Reference b) -> Lens' AllReferenceState b
 joinLens r f a = unwrapLens (runReader r a) f a
 
 type AllReferenceState = [ReferenceState]
@@ -52,42 +53,43 @@ type AllReferenceState = [ReferenceState]
 data ReferenceState where
     ReferenceState :: (AllReferenceState -> a -> a) -> a -> ReferenceState
 
-type RefM = StateT AllReferenceState
+type RefWriterT = StateT AllReferenceState
+type ReferenceReader = Reader AllReferenceState
 
 initAllReferenceState :: AllReferenceState
 initAllReferenceState = []
 
-instance MonadRefReader (Reader AllReferenceState) where
-    type BaseRef (Reader AllReferenceState) = WrappedLens AllReferenceState
+instance MonadRefReader ReferenceReader where
+    type BaseRef ReferenceReader = Reference
     liftRefReader = id
 
-instance (Monad m, Applicative m) => MonadRefReader (RefWriterOf (ReaderT AllReferenceState m)) where
-    type BaseRef (RefWriterOf (ReaderT AllReferenceState m)) = WrappedLens AllReferenceState
+instance MonadRefReader (RefWriterOf ReferenceReader) where
+    type BaseRef (RefWriterOf ReferenceReader) = Reference
     liftRefReader = RefWriterOfReaderT . gets . runReader
 
-instance MonadRefWriter (RefWriterOf (Reader AllReferenceState)) where
+instance MonadRefWriter (RefWriterOf ReferenceReader) where
     liftRefWriter = id
 
-instance RefClass (WrappedLens AllReferenceState) where
-    type RefReaderSimple (WrappedLens AllReferenceState) = Reader AllReferenceState
+instance RefClass (Reference) where
+    type RefReaderSimple (Reference) = ReferenceReader
 
     readRefSimple r = view $ joinLens r
-    writeRefSimple r a = joinLens r .= a
-    lensMap l r = pure $ WrappedLens $ joinLens r . l
-    unitRef = pure $ WrappedLens united
+    writeRefSimple r a = RefWriterOfReaderT $ joinLens r .= a
+    lensMap l r = pure $ Reference $ joinLens r . l
+    unitRef = pure $ Reference united
 
-instance (Monad m, Applicative m) => MonadRefReader (RefM m) where
-    type BaseRef (RefM m) = WrappedLens AllReferenceState
+instance (Monad m, Applicative m) => MonadRefReader (RefWriterT m) where
+    type BaseRef (RefWriterT m) = Reference
 
     liftRefReader = gets . runReader
 
-instance (Monad m, Applicative m) => MonadRefCreator (RefM m) where
+instance (Monad m, Applicative m) => MonadRefCreator (RefWriterT m) where
     extRef r r2 a0 = state extend
       where
         rk = set (joinLens r) . (^. r2)
         kr = set r2 . (^. joinLens r)
 
-        extend x0 = (pure $ WrappedLens $ lens get set, x0 ++ [ReferenceState kr (kr x0 a0)])
+        extend x0 = (pure $ Reference $ lens get set, x0 ++ [ReferenceState kr (kr x0 a0)])
           where
             limit = splitAt (length x0)
 
@@ -103,10 +105,10 @@ instance (Monad m, Applicative m) => MonadRefCreator (RefM m) where
         unsafeData (ReferenceState _ a) = unsafeCoerce a
 
 
-instance (Monad m, Applicative m) => MonadMemo (RefM m) where
+instance (Monad m, Applicative m) => MonadMemo (RefWriterT m) where
     memoRead = memoRead_
 
-instance (Monad m, Applicative m) => MonadRefWriter (RefM m) where
+instance (Monad m, Applicative m) => MonadRefWriter (RefWriterT m) where
     liftRefWriter = state . runState . runRefWriterOfReaderT
 
 
@@ -116,11 +118,11 @@ type ISt m
     = (MonadMonoid m (), RegionStatusChange -> MonadMonoid m ())
 
 newtype Register m a
-    = Register { unRegister :: ReaderT (RefM m () -> m ()) (WriterT (ISt (RefM m)) (RefM m)) a }
+    = Register { unRegister :: ReaderT (RefWriterT m () -> m ()) (WriterT (ISt (RefWriterT m)) (RefWriterT m)) a }
         deriving (Monad, Applicative, Functor, MonadFix)
 
 instance (Monad m, Applicative m) => MonadRefReader (Register m) where
-    type BaseRef (Register m) = WrappedLens AllReferenceState
+    type BaseRef (Register m) = Reference
     liftRefReader = Register . lift . lift . liftRefReader
 
 instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
@@ -133,8 +135,8 @@ instance (Monad m, Applicative m) => MonadMemo (Register m) where
 instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
     liftRefWriter = Register . lift . lift . liftRefWriter
 
-instance (Monad m, Applicative m) => MonadEffect (RefM m) where
-    type EffectM (RefM m) = m
+instance (Monad m, Applicative m) => MonadEffect (RefWriterT m) where
+    type EffectM (RefWriterT m) = m
     liftEffectM = lift
 
 instance (Monad m, Applicative m) => MonadEffect (Register m) where
@@ -143,7 +145,7 @@ instance (Monad m, Applicative m) => MonadEffect (Register m) where
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
-    type Modifier (Register m) = RefM m
+    type Modifier (Register m) = RefWriterT m
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
@@ -157,7 +159,7 @@ runRegister newChan m = do
     runRegister_ read write m
 
 
-runRegister_ :: (Monad m, Applicative m) => m (RefM m ()) -> (RefM m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ :: (Monad m, Applicative m) => m (RefWriterT m ()) -> (RefWriterT m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Register m) = do
     ((a, tick), s) <- flip runStateT initAllReferenceState $ do
         (a, (w, _)) <- runWriterT $ runReaderT m write
@@ -231,7 +233,7 @@ runTests = tests runTest
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
 runTest name = runTest_ name (TP . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
-newtype TP = TP { unTP :: RefM (Prog TP) () }
+newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
