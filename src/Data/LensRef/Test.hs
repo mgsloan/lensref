@@ -302,7 +302,6 @@ tests runTest = do
         r <- newRef "x"
         _ <- onChange (readRef r) message
         postponeModification $ writeRef r "y"
-        pure ()
             ) $ do
         message' "x"
         pure $ (,) () $ do
