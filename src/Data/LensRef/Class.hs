@@ -25,7 +25,7 @@ module Data.LensRef.Class
     , MonadEffect (..)
 
     -- * Dynamic networks
-    , MonadRegister (..)
+    , MonadRegister (..), Modifier
     , RegionStatusChange (..)
     , RegionStatusChangeHandler
 
@@ -96,7 +96,10 @@ type RefSimple r a = RefReaderSimple r (r a)
 infixr 8 `lensMap`
 
 -- | TODO
-class (Applicative m, Monad m) => MonadRefReader m where
+class ( Applicative m, Monad m
+      , BaseRef (RefWriter m) ~ BaseRef m
+      )
+    => MonadRefReader m where
 
     -- | Base reference associated to the reference reader monad
     type BaseRef m :: * -> *
@@ -121,7 +124,9 @@ type Ref m a = RefSimple (BaseRef m) a
 
 
 -- | TODO
-class (Monad m, MonadRefReader m) => MonadRefWriter m where
+class ( MonadRefReader m
+      )
+    => MonadRefWriter m where
 
     liftRefWriter :: RefWriter m a -> m a
 
@@ -139,7 +144,11 @@ create the same type of references in multiple monads.
 
 For basic usage examples, look into the source of @Data.LensRef.Test@.
 -}
-class (RefClass (BaseRef m), MonadRefReader m, MonadMemo m) => MonadRefCreator m where
+class ( RefClass (BaseRef m)
+      , MonadRefReader m
+      , MonadMemo m
+      )
+    => MonadRefCreator m where
 
     {- | Reference creation by extending the state of an existing reference.
 
@@ -201,9 +210,9 @@ class (Monad (EffectM m), Applicative (EffectM m)) => MonadEffect m where
 
 
 -- | Monad for dynamic actions
-class ( MonadEffect m, MonadRefCreator m
-      , MonadRefWriter (Modifier m), MonadEffect (Modifier m)
-      , BaseRef (Modifier m) ~ BaseRef m
+class ( MonadRefCreator m
+      , MonadEffect m
+      , MonadEffect (Modifier m)
       , EffectM (Modifier m) ~ EffectM m
       )
     => MonadRegister m where
@@ -225,9 +234,10 @@ class ( MonadEffect m, MonadRefCreator m
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-    type Modifier m :: * -> *
-
     askPostpone :: m (Modifier m () -> EffectM m ())
+
+
+type Modifier m = RefWriter m
 
 
 -- | TODO
