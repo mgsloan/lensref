@@ -473,6 +473,24 @@ tests runTest = do
             message' "e"
             message' "4"
 
+    runTest "schedule" (do
+        r <- newRef "a"
+        q <- newRef "b"
+        _ <- onChange (readRef r) message
+        _ <- onChange (readRef q) message
+        postponeModification $ message "." >> writeRef r "x" >> writeRef q "y"
+        postponeModification $ message ".." >> writeRef q "1" >> writeRef r "2"
+        ) $ do
+        message' "a"
+        message' "b"
+        pure $ (,) () $ do
+            message' "."
+            message' "x"
+            message' "y"
+            message' ".."
+            message' "2"
+            message' "1"
+
 {-
     runTest "listen-listen" (do
         listen 1 $ \s -> case s of
