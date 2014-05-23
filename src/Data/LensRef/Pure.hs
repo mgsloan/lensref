@@ -37,15 +37,15 @@ import Data.LensRef.Test
 
 ----------------------
 
-newtype instance RefWriterOf ReferenceReader a
-    = RefWriterOfReaderT { runRefWriterOfReaderT :: RefWriterT Identity a }
+newtype instance RefWriterOf (RefReaderT m) a
+    = RefWriterOfReaderT { runRefWriterOfReaderT :: RefWriterT m a }
         deriving (Monad, Applicative, Functor)
 
 ----------------------
 
 newtype Reference b = Reference {unwrapLens :: Lens' AllReferenceState b}
 
-joinLens :: ReferenceReader (Reference b) -> Lens' AllReferenceState b
+joinLens :: RefReaderT Identity (Reference b) -> Lens' AllReferenceState b
 joinLens r f a = unwrapLens (runReader r a) f a
 
 type AllReferenceState = [ReferenceState]
@@ -54,24 +54,24 @@ data ReferenceState where
     ReferenceState :: (AllReferenceState -> a -> a) -> a -> ReferenceState
 
 type RefWriterT = StateT AllReferenceState
-type ReferenceReader = Reader AllReferenceState
+type RefReaderT = ReaderT AllReferenceState
 
 initAllReferenceState :: AllReferenceState
 initAllReferenceState = []
 
-instance MonadRefReader ReferenceReader where
-    type BaseRef ReferenceReader = Reference
+instance MonadRefReader (RefReaderT Identity) where
+    type BaseRef (RefReaderT Identity) = Reference
     liftRefReader = id
 
-instance MonadRefReader (RefWriterOf ReferenceReader) where
-    type BaseRef (RefWriterOf ReferenceReader) = Reference
+instance (Monad m, Applicative m) => MonadRefReader (RefWriterOf (RefReaderT m)) where
+    type BaseRef (RefWriterOf (RefReaderT m)) = Reference
     liftRefReader = RefWriterOfReaderT . gets . runReader
 
-instance MonadRefWriter (RefWriterOf ReferenceReader) where
-    liftRefWriter = id
+instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (RefReaderT m)) where
+    liftRefWriter = RefWriterOfReaderT . mapStateT (pure . runIdentity) . runRefWriterOfReaderT
 
 instance RefClass (Reference) where
-    type RefReaderSimple (Reference) = ReferenceReader
+    type RefReaderSimple (Reference) = (RefReaderT Identity)
 
     readRefSimple r = view $ joinLens r
     writeRefSimple r a = RefWriterOfReaderT $ joinLens r .= a
@@ -135,9 +135,9 @@ instance (Monad m, Applicative m) => MonadMemo (Register m) where
 instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
     liftRefWriter = Register . lift . lift . liftRefWriter
 
-instance (Monad m, Applicative m) => MonadEffect (RefWriterT m) where
-    type EffectM (RefWriterT m) = m
-    liftEffectM = lift
+instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) where
+    type EffectM (RefWriterOf (RefReaderT m)) = m
+    liftEffectM = RefWriterOfReaderT . lift
 
 instance (Monad m, Applicative m) => MonadEffect (Register m) where
     type EffectM (Register m) = m
@@ -145,11 +145,11 @@ instance (Monad m, Applicative m) => MonadEffect (Register m) where
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
-    type Modifier (Register m) = RefWriterT m
+    type Modifier (Register m) = RefWriterOf (RefReaderT m)
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
-    askPostpone = Register ask
+    askPostpone = fmap (\f -> f . runRefWriterOfReaderT) $ Register ask
 
     onRegionStatusChange g = Register $ tell (mempty, MonadMonoid . lift . g)
 
