@@ -146,7 +146,7 @@ instance (Monad m, Applicative m) => MonadEffect (Register m) where
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
---    type Modifier (Register m) = RefWriterOf (RefReaderT m)
+--    type RefWriter (Register m) = RefWriterOf (RefReaderT m)
 
     onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 

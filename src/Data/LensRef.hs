@@ -22,7 +22,7 @@ module Data.LensRef
     , RefWriter
 
     -- ** Dynamic networks
-    , onChange, onChangeMemo, Modifier, MonadRegister --MonadRegister (..)
+    , onChange, onChangeMemo, RefWriter, MonadRegister --MonadRegister (..)
 --    , RegionStatusChange (..)
 
     -- ** Other
@@ -57,7 +57,7 @@ import Data.LensRef.Class
 
 
 -- | TODO
-postponeModification :: MonadRegister m => Modifier m () -> m ()
+postponeModification :: MonadRegister m => RefWriter m () -> m ()
 postponeModification m = askPostpone >>= liftEffectM . ($ m)
 
 

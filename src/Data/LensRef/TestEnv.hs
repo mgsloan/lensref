@@ -63,11 +63,11 @@ message = liftEffectM . singleton . Message
 infix 0 ==?
 
 -- | Check an equality.
---(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (Modifier m)) => a -> a -> m ()
+--(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (RefWriter m)) => a -> a -> m ()
 rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
 
 
-listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> Modifier m ()) -> m ()
+listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> RefWriter m ()) -> m ()
 listen i m = do
     post <- askPostpone
     id <- liftEffectM . singleton $ Listen i $ post . m

@@ -25,7 +25,7 @@ module Data.LensRef.Class
     , MonadEffect (..)
 
     -- * Dynamic networks
-    , MonadRegister (..), Modifier
+    , MonadRegister (..), RefWriter
     , RegionStatusChange (..)
     , RegionStatusChangeHandler
 
@@ -212,8 +212,8 @@ class (Monad (EffectM m), Applicative (EffectM m)) => MonadEffect m where
 -- | Monad for dynamic actions
 class ( MonadRefCreator m
       , MonadEffect m
-      , MonadEffect (Modifier m)
-      , EffectM (Modifier m) ~ EffectM m
+      , MonadEffect (RefWriter m)
+      , EffectM (RefWriter m) ~ EffectM m
       )
     => MonadRegister m where
 {-
@@ -234,10 +234,7 @@ class ( MonadRefCreator m
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-    askPostpone :: m (Modifier m () -> EffectM m ())
-
-
-type Modifier m = RefWriter m
+    askPostpone :: m (RefWriter m () -> EffectM m ())
 
 
 -- | TODO
