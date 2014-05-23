@@ -7,29 +7,29 @@ module Data.LensRef
     -- * Core
 
     -- ** References
-      unitRef, lensMap      , RefReaderSimple, RefClass --RefClass (..)
+      unitRef
+    , lensMap
+            -- TODO: elim these?
+            , RefReaderSimple, RefClass --RefClass (..)
             , RefSimple
---    , RefWriterOf
---    , RefWriterSimple
-
-    , liftRefReader, readRef --MonadRefReader (..)
-    , writeRef --MonadRefWriter (..)
-
-    -- ** Reference creation
-    , newRef, extRef, MonadRefCreator --MonadRefCreator (..)
+    , MonadRefReader (..)
+    , MonadRefWriter (..)
     , Ref
     , RefReader
     , RefWriter
 
+    -- ** Reference creation
+    , MonadRefCreator (..)
+
     -- ** Dynamic networks
-    , onChange, onChangeMemo, RefWriter, MonadRegister --MonadRegister (..)
---    , RegionStatusChange (..)
+    , MonadRegister
+    , onChange
+    , onChangeMemo
 
     -- ** Other
-    , memoRead --MonadMemo (..)
+    , MonadMemo (..)
 
     -- * Derived constructs
-    , modRef
     , postponeModification
 --    , undoTr
 
@@ -60,10 +60,6 @@ import Data.LensRef.Class
 postponeModification :: MonadRegister m => RefWriter m () -> m ()
 postponeModification m = askPostpone >>= liftEffectM . ($ m)
 
-
--- | @modRef r f@ === @readRef r >>= writeRef r . f@
-modRef :: (MonadRefWriter m, RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> (a -> a) -> m ()
-r `modRef` f = readRef r >>= writeRef r . f
 
 
 

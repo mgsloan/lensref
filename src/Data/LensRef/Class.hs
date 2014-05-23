@@ -14,18 +14,18 @@ module Data.LensRef.Class
 
     , MonadRefReader (..)
     , MonadRefWriter (..)
-
-    -- * Reference creation
-    , MonadRefCreator (..)
     , Ref
     , RefReader
     , RefWriter
+
+    -- * Reference creation
+    , MonadRefCreator (..)
 
     -- * Effects
     , MonadEffect (..)
 
     -- * Dynamic networks
-    , MonadRegister (..), RefWriter
+    , MonadRegister (..)
     , RegionStatusChange (..)
     , RegionStatusChangeHandler
 
@@ -35,7 +35,6 @@ module Data.LensRef.Class
 
 
 import Control.Applicative
-import Control.Monad.Reader
 import Control.Lens.Simple (Lens', united)
 
 --------------------------------
@@ -49,7 +48,11 @@ If @(r :: RefReaderSimple r (RefSimple r a))@ then @(join r :: RefSimple r a)@.
 This is possible because reference operations work with @(RefReaderSimple r (r a))@ instead
 of just @(r a)@. For more compact type signatures, @(RefReaderSimple r (r a))@ is called @(RefSimple r a)@.
 -}
-class (MonadRefWriter (RefWriterSimple r), MonadRefReader (RefReaderSimple r), RefReader (RefReaderSimple r) ~ RefReaderSimple r) => RefClass r where
+class ( MonadRefReader (RefReaderSimple r)
+      , MonadRefWriter (RefWriterSimple r)
+      , RefReader (RefReaderSimple r) ~ RefReaderSimple r
+      )
+    => RefClass r where
 
     {- | unit reference
     -}
@@ -134,6 +137,10 @@ class ( MonadRefReader m
     -}
     writeRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> a -> m ()
     writeRef r = liftRefWriter . writeRefSimple r
+
+    -- | @modRef r f@ === @readRef r >>= writeRef r . f@
+    modRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> (a -> a) -> m ()
+    r `modRef` f = readRef r >>= writeRef r . f
 
 
 
