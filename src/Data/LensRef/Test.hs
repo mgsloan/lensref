@@ -455,14 +455,24 @@ tests runTest = do
     runTest "onChange value" (do
         r <- newRef (0 :: Int)
         q <- onChange (readRef r) pure
-        onChange q $ message . show
-        postponeModification $ writeRef r 1
-        postponeModification $ writeRef r 2
+        _ <- onChange q $ message . show
+        postponeModification $ message "a" >> writeRef r 1
+        postponeModification $ message "b" >> writeRef r 2
+        postponeModification $ message "c" >> writeRef r 3
+        postponeModification $ message "d" >> writeRef r 3
+        postponeModification $ message "e" >> writeRef r 4
         ) $ do
         message' "0"
         pure $ (,) () $ do
+            message' "a"
             message' "1"
+            message' "b"
             message' "2"
+            message' "c"
+            message' "3"
+            message' "d"
+            message' "e"
+            message' "4"
 
 {-
     runTest "listen-listen" (do

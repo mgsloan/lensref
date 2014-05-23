@@ -293,25 +293,28 @@ instance NewRef m => MonadRegister (Register m) where
         v <- lift $ value mr
         (y, h1) <- lift $ runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ f v
         ti <- lift $ runMorph ticker get
-        nr <- lift $ newRef_ ((ti-1, v), (h1, y))
+        nr <- lift $ newRef' ((ti-1, v), (h1, y))
 
         let ev = do
               ti <- runMorph ticker get
-              ((ti',vold), (h1_, y_)) <- value $ readRefSimple nr
+              ((ti',vold), (h1_, y_)) <- runMorph nr get
               if ti == ti' then pure () else do
                 v <- value mr
                 if v == vold
                   then
-                    runRefWriterT $ writeRef nr ((ti, v), (h1_, y_))
+                    runMorph nr $ put ((ti, v), (h1_, y_))
                   else do
                     runMonadMonoid $ h1_ Kill
                     (y, h1) <- runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ f v
-                    runRefWriterT $ writeRef nr ((ti, v), (h1, y))
+                    runMorph nr $ put ((ti, v), (h1, y))
 
         registerOnChange mr $ do
             runMorph st2 $ modify (`mappend` MonadMonoid ev)
 
-        pure $ readRef $ (_2 . _2) `lensMap` nr
+        pure $ RefReaderT
+                { value_ = runMorph nr $ gets $ snd . snd
+                , registerOnChange_ = registerOnChange mr
+                }
 
 --    onChangeMemo (RefReaderTPure x) f = ...
     onChangeMemo mr f = Reg $ ReaderT $ \st@(_, st2, ticker) -> RefCreatorT $ do
@@ -319,18 +322,18 @@ instance NewRef m => MonadRegister (Register m) where
         (my, h1) <- lift $ runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ f v
         (y, h2) <- lift $ runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ my
         ti <- lift $ runMorph ticker get
-        nr <- lift $ newRef_ (((ti-1, v), ((my, h1, h2), y)), [])
+        nr <- lift $ newRef' (((ti-1, v), ((my, h1, h2), y)), [])
 
         let ev = do
               ti <- runMorph ticker get
-              (((ti',vold), dat@((_, h1_, h2_), _)), others) <- value $ readRefSimple nr
+              (((ti',vold), dat@((_, h1_, h2_), _)), others) <- runMorph nr get
               if ti == ti' then pure () else do
                 v <- value mr
                 let others' = la: others
                     la = (vold, dat)
                 if v == vold
                   then
-                    runRefWriterT $ writeRef nr (((ti, v), dat), others)
+                    runMorph nr $ put (((ti, v), dat), others)
                   else do
                     runMonadMonoid $ h1_ Block
                     runMonadMonoid $ h2_ Kill
@@ -338,16 +341,19 @@ instance NewRef m => MonadRegister (Register m) where
                       Just ((my, h1, _), _) -> do
                         runMonadMonoid $ h1 Unblock
                         (y, h2) <- runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ my
-                        runRefWriterT $ writeRef nr (((ti,v), ((my, h1, h2), y)), filter ((/=v) . fst) $ others')
+                        runMorph nr $ put (((ti,v), ((my, h1, h2), y)), filter ((/=v) . fst) $ others')
                       Nothing -> do
                         (my, h1) <- runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ f v
                         (y, h2) <- runWriterT $ runRefCreatorT $ flip runReaderT st $ unReg $ my
-                        runRefWriterT $ writeRef nr (((ti,v), ((my, h1, h2), y)), others')
+                        runMorph nr $ put (((ti,v), ((my, h1, h2), y)), others')
 
         registerOnChange mr $ do
             runMorph st2 $ modify (`mappend` MonadMonoid ev)
 
-        pure $ readRef $ (_1 . _2 . _2) `lensMap` nr
+        pure $ RefReaderT
+                { value_ = runMorph nr $ gets $ snd . snd . fst
+                , registerOnChange_ = registerOnChange mr
+                }
 
     askPostpone = Reg $ ReaderT $ \(st, _, _) -> pure $ st . runRefWriterT
 
