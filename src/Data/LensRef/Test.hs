@@ -449,6 +449,21 @@ tests runTest = do
             message' "(True,3)"
             message' "Just 1"
             message' "(True,1)"
+
+--    let r ===> v = liftRefReader r >>= (==? v)
+
+    runTest "onChange value" (do
+        r <- newRef (0 :: Int)
+        q <- onChange (readRef r) pure
+        onChange q $ message . show
+        postponeModification $ writeRef r 1
+        postponeModification $ writeRef r 2
+        ) $ do
+        message' "0"
+        pure $ (,) () $ do
+            message' "1"
+            message' "2"
+
 {-
     runTest "listen-listen" (do
         listen 1 $ \s -> case s of
