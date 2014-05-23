@@ -491,6 +491,21 @@ tests runTest = do
             message' "2"
             message' "1"
 
+    runTest "diamond" (do
+        r <- newRef "a"
+        q <- newRef "b"
+        rq <- onChange (liftA2 (++) (readRef r) (readRef q)) $ pure . pure
+        _ <- onChange (join rq) message
+        postponeModification $ message "." >> writeRef r "x" >> writeRef q "y"
+        postponeModification $ message ".." >> writeRef q "1" >> writeRef r "2"
+        ) $ do
+        message' "ab"
+        pure $ (,) () $ do
+            message' "."
+            message' "xy"
+            message' ".."
+            message' "21"
+
 {-
     runTest "listen-listen" (do
         listen 1 $ \s -> case s of

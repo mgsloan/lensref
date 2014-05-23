@@ -90,9 +90,9 @@ instance NewRef m => Monad (RefReaderT m) where
         , registerOnChange_ = \action -> do
             r <- lift $ newRef' $ const $ pure ()
             registerOnChange mr $ do
-                v <- value mr
                 runMorph r $ StateT $ \innerhandler -> do
                     runMonadMonoid $ innerhandler Kill
+                    v <- value mr
                     newinnerhandler <- execWriterT $ registerOnChange (f v) action
                     pure ((), newinnerhandler)
             tell $ \inst -> do
@@ -176,7 +176,7 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
         rqueue <- lift $ newRef' emptyQueue
         status <- lift $ newRef' True -- True: normal; False:
 
-        registerOnChange (readRefSimple mr) $ do
+        lift $ fmap fst $ runWriterT $ registerOnChange (readRefSimple mr) $ do
             s <- runMorph status get
             when s $ do
                 b <- value $ readRefSimple mr
@@ -239,6 +239,7 @@ addElem a as = ((getElem, delElem), IMap.insert i (True,a) as)
     i = maybe 0 ((+1) . fst . fst) $ IMap.maxViewWithKey as
 
     getElem is = snd $ is IMap.! i
+--    delElem _ is = ([], is)  -- !!!
     delElem Kill is = ([], IMap.delete i is)
     delElem Block is = ([], IMap.adjust ((set _1) False) i is)
     delElem Unblock is = (map snd $ maybeToList $ IMap.lookup i is, IMap.adjust ((set _1) True) i is)

@@ -42,14 +42,16 @@ data Inst t a where
     ReadI :: Inst t t
     WriteI :: t -> Inst t ()
     NewRef :: a -> Inst t (Morph (StateT a (Prog t)) (Prog t))
+    NewId :: Inst t Int
 
-type Prog t = ProgramT (Inst t) (State (Seq.Seq Any))
+type Prog t = ProgramT (Inst t) (State (Int, Seq.Seq Any))
 
 
 ---------------------------------------------------
 
 instance NewRef (Prog t) where
     newRef' = singleton . NewRef
+    newId = singleton NewId
 
 instance MonadEffect (Prog t) where
     type EffectM (Prog t) = Prog t
@@ -131,7 +133,7 @@ data ST m = ST
     { _postponed :: [m]
     , _listeners :: [Listener m]
     , _idcounter :: Int
-    , _vars :: Seq.Seq Any
+    , _vars :: (Int, Seq.Seq Any)
     }
 makeLenses ''ST
 
@@ -147,7 +149,7 @@ coeval_ lift_ q p = do
 
 coeval__ :: forall a b m
      . (Prog m () -> m)
-    -> ProgramViewT (Inst m) (State (Seq.Seq Any)) a
+    -> ProgramViewT (Inst m) (State (Int, Seq.Seq Any)) a
     -> Prog' b
     -> StateT (ST m) Er (Maybe a, Prog' b)
 coeval__ lift_ op p = do
@@ -200,19 +202,23 @@ coeval__ lift_ op p = do
         postponed %= (++[x])
         coeval_ lift_ (k ()) p
 
+    (NewId :>>= k, _) -> do
+        i <- zoom (vars . _1) $ state $ \c -> (c, succ c)
+        coeval_ lift_ (k i) p
+
     (NewRef a :>>= k, _) -> do
-        n <- use $ vars . to Seq.length
+        n <- use $ vars . _2 . to Seq.length
 
         let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
             ff _ (StateT f) = do
-                v <- gets (`Seq.index` n)
-                modify $ Seq.update n $ error "recursive reference modification"
+                v <- gets $ (`Seq.index` n) . snd
+                modify $ over _2 $ Seq.update n $ error "recursive reference modification"
                 case v of
                   Any w -> do
                     (x, w') <- f $ unsafeCoerce w
-                    modify $ Seq.update n $ Any w'
+                    modify $ over _2 $ Seq.update n $ Any w'
                     pure x
-        vars %= (Seq.|> Any a)
+        (vars . _2) %= (Seq.|> Any a)
         coeval_ lift_ (k $ Morph $ ff a) p
 
     (_, Send i@(Port pi) s :>>= k) -> do
@@ -242,7 +248,7 @@ runTest_ :: (Eq a, Show a, m ~ Prog n)
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 Seq.empty) $ do
+runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
     (Just (a1,c),pe) <- coeval_ lift (runRegister_ (singleton ReadI) (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
