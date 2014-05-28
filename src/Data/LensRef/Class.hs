@@ -35,6 +35,8 @@ module Data.LensRef.Class
 
 
 import Control.Applicative
+import Control.Monad.Writer
+import Control.Monad.Trans.Control
 import Control.Lens.Simple (Lens', united)
 
 --------------------------------
@@ -209,11 +211,27 @@ class (Monad m, Applicative m) => MonadMemo m where
 -}
 
 -- | TODO
-class (Monad (EffectM m), Applicative (EffectM m)) => MonadEffect m where
+class ( Monad m, Applicative m
+      , Monad (EffectM m), Applicative (EffectM m)
+      )
+    => MonadEffect m where
 
     type EffectM m :: * -> *
 
     liftEffectM :: EffectM m a -> m a
+
+{-
+class ( MonadRefCreator m
+      )
+    => MonadUpdate m where
+
+    -- onUpdate
+    accRef :: RefReader m a -> b -> (a -> b -> m b) -> m (Ref m b, Handle m)
+
+    extRef :: Ref m b -> Lens' a b -> a -> m (Ref m a)
+
+        -- handle:  block, unblock, kill, perform
+-}
 
 
 -- | Monad for dynamic actions
@@ -249,5 +267,34 @@ data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 
 -- | TODO
 type RegionStatusChangeHandler m = RegionStatusChange -> m ()
+
+--------------------------------------------------- instances
+
+instance (MonadRefReader m, Monoid w) => MonadRefReader (WriterT w m) where
+    type BaseRef (WriterT w m) = BaseRef m
+    liftRefReader = lift . liftRefReader
+
+instance (MonadRefCreator m, Monoid w) => MonadRefCreator (WriterT w m) where
+    extRef r l = lift . extRef r l
+    newRef = lift . newRef
+
+instance (MonadMemo m, Monoid w) => MonadMemo (WriterT w m) where
+    memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
+
+instance (MonadEffect m, Monoid w) => MonadEffect (WriterT w m) where
+    type EffectM (WriterT w m) = EffectM m
+    liftEffectM = lift . liftEffectM
+{-
+instance (MonadRegister m, Monoid w) => MonadRegister (WriterT w m) where
+    type UpdateM (WriterT w m) = UpdateM m
+    onUpdate r b f = lift $ onUpdate r b f
+    askPostpone = lift askPostpone
+    onRegionStatusChange g = lift $ onRegionStatusChange g
+-}
+
+
+
+
+
 
 
