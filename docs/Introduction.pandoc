@@ -35,7 +35,7 @@ The needed definitions in a form which is general enough to our current purposes
 > _2 = (snd, \(x, _) y -> (x, y))
 
 > (.) :: Lens' a b -> Lens' b c -> Lens' a c
-> -- I cheat here, read ... to understand how function
+> -- I cheat here, see [?] to understand why function
 > -- composition can be used for lens compostion
 
 ## How to apply a lens to an `IORef`?
@@ -173,6 +173,26 @@ first and `r` was defined by
 
 In this sense `extRef` is the inverse of `lensMap` and this is why I call it backward
 lens application.
+
+~~~~~~~~ {.dot}
+digraph G {
+    rankdir = BT
+    node [shape = none]
+    r -> "r'" [label = "_1"]
+}
+~~~~~~~~
+
+~~~~~~~~ {.dot}
+digraph G {
+    rankdir = BT
+    node [shape = none]
+    "p :: BigState" -> "..."
+    "..." -> "q :: Maybe Int"
+    "r :: (Bool, Int)" -> "q :: Maybe Int"  [label = "maybeLens"]
+    "r :: (Bool, Int)" -> "checkbox :: Bool" [label = "_1"]
+    "r :: (Bool, Int)" -> "entry :: Int" [label = "_2"]
+}
+~~~~~~~~
 
 
 ## Implementation of `extRef`
