@@ -239,6 +239,91 @@ coeval__ lift_ op p = do
 
     (Return x, _) -> pure (Just x, p)
 
+type Er' = Writer [Either (Either String String) String] --ErrorT String (Writer [String])
+
+
+eval_ :: forall a m
+     . (Prog m () -> m)
+    -> Prog m a
+    -> StateT (ST m) Er' (Either a (m -> Prog m a))
+eval_ lift_ q = do
+    op <- zoom vars $ mapStateT lift $ viewT q
+    eval__ lift_ op
+
+eval__ :: forall a m
+     . (Prog m () -> m)
+    -> ProgramViewT (Inst m) (State (Int, Seq.Seq Any)) a
+    -> StateT (ST m) Er' (Either a (m -> Prog m a))
+eval__ lift_ op = do
+  nopostponed <- use $ postponed . to null
+  case op of
+
+    Message s :>>= k -> do
+        tell_ ("message: " ++ s)
+        eval_ lift_ (k ())
+
+    SetStatus i status :>>= k -> do
+        listeners %= case status of
+            Kill -> filter ((/=i) . (^. listenerId))
+            Block -> map f where
+                f (Listener i' c Unblock x) | i' == i = Listener i c Block x
+                f x = x
+            Unblock -> map f where
+                f (Listener i' c Block x) | i' == i = Listener i c Unblock x
+                f x = x
+        eval_ lift_ (k ())
+
+    Listen i lr :>>= k -> do
+        co <- use idcounter
+        listeners %= (Listener (Id co) i Unblock lr :)
+        idcounter %= (+1)
+        eval_ lift_ (k $ Id co)
+
+    ReadI :>>= k | not nopostponed -> do
+        x <- use $ postponed . to head
+        postponed %= tail
+        eval_ lift_ (k x)
+
+    WriteI x :>>= k -> do
+        postponed %= (++[x])
+        eval_ lift_ (k ())
+
+    NewId :>>= k -> do
+        i <- zoom (vars . _1) $ state $ \c -> (c, succ c)
+        eval_ lift_ (k i)
+
+    NewRef a :>>= k -> do
+        n <- use $ vars . _2 . to Seq.length
+
+        let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
+            ff _ (StateT f) = do
+                v <- gets $ (`Seq.index` n) . snd
+                modify $ over _2 $ Seq.update n $ error "recursive reference modification"
+                case v of
+                  Any w -> do
+                    (x, w') <- f $ unsafeCoerce w
+                    modify $ over _2 $ Seq.update n $ Any w'
+                    pure x
+        (vars . _2) %= (Seq.|> Any a)
+        eval_ lift_ (k $ Morph $ ff a)
+{-
+    (_, Send i@(Port pi) s :>>= k) -> do
+        tell_ $ "send " ++ show i ++ " " ++ show s
+        if not nopostponed
+          then do
+            fail' $ "early send of " ++ show s
+          else do
+            li' <- use $ listeners . to (\li -> [lift_ $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
+            if (null li')
+              then do
+                fail' $ "message is not received: " ++ show i ++ " " ++ show s
+              else do
+                postponed %= (++ li')
+        coeval__ lift_ op (k ())
+-}
+    ReadI :>>= q | nopostponed -> pure $ Right q
+
+    Return x -> pure $ Left x
 
 
 runTest_ :: (Eq a, Show a, m ~ Prog n)
