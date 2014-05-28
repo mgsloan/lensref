@@ -505,6 +505,36 @@ tests runTest = do
             message' ".."
             message' "21"
 
+    runTestSimple "ordering" $ do
+        t1 <- newRef $ Just (3 :: Int)
+        t <- newRef t1
+        let r = join $ readRef t
+        q <- extRef r maybeLens (False, 0)
+        let q1 = _1 `lensMap` q
+            q2 = _2 `lensMap` q
+        r ==> Just 3
+        q ==> (True, 3)
+        writeRef r Nothing
+        r ==> Nothing
+        q ==> (False, 3)
+        q1 ==> False
+        writeRef q1 True
+        r ==> Just 3
+        writeRef q2 1
+        r ==> Just 1
+        t2 <- newRef $ Just (3 :: Int)
+        writeRef t t2
+        r ==> Just 3
+        q ==> (True, 3)
+        writeRef r Nothing
+        r ==> Nothing
+        q ==> (False, 3)
+        q1 ==> False
+        writeRef q1 True
+        r ==> Just 3
+        writeRef q2 1
+        r ==> Just 1
+
     runTestSimple "time" $ do
         t1 <- newRef "z"
         r <- newRef "a"
@@ -517,6 +547,14 @@ tests runTest = do
         q ==> "."
         writeRef t1 "q"
         q ==> "."
+
+    runTestSimple "recursion" $ do
+        r <- newRef "x"
+        rr <- newRef r
+        let r' = join $ readRef rr
+        r' ==> "x"
+        writeRef rr r'
+        r' ==> "x"
 
 
 {-
