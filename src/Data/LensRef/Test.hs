@@ -253,7 +253,6 @@ tests runTest = do
         redo === False
         undo === True
 
-
     runTest "trivial" (pure ()) $ do
         pure ((), pure ())
 
@@ -505,6 +504,20 @@ tests runTest = do
             message' "xy"
             message' ".."
             message' "21"
+
+    runTestSimple "time" $ do
+        t1 <- newRef "z"
+        r <- newRef "a"
+        q_ <- extRef r (lens fst (\(_, y) x -> (x, ""))) ("","")
+        let q = lensMap _2 q_
+        t2 <- newRef "z"
+        writeRef q "."
+        q ==> "."
+        writeRef t2 "q"
+        q ==> "."
+        writeRef t1 "q"
+        q ==> "."
+
 
 {-
     runTest "listen-listen" (do
