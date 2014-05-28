@@ -289,8 +289,6 @@ instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
 
 instance NewRef m => MonadRegister (Register m) where
 
---    type RefWriter (Register m) = RefWriterT m
-
     onChange (RefReaderTPure x) f = fmap pure $ f x
     onChange mr f = Reg $ ReaderT $ \st@(_, st2, ticker) -> RefCreatorT $ do
         v <- lift $ value mr
