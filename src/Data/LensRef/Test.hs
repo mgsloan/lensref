@@ -59,6 +59,7 @@ tests runTest = do
         q ==> (False, 3)
         q1 ==> False
         writeRef q1 True
+        q1 ==> True
         r ==> Just 3
         writeRef q2 1
         r ==> Just 1
@@ -72,12 +73,119 @@ tests runTest = do
         r ==> 3
         writeRef r1 4
         r ==> 4
+        writeRef r 8
+        r1 ==> 8
+        r2 ==> 5
         writeRef rr r2
         r ==> 5
         writeRef r1 4
         r ==> 5
         writeRef r2 14
         r ==> 14
+        writeRef r 10
+        r1 ==> 4
+        r2 ==> 10
+        writeRef rr r1
+        r ==> 4
+        r1 ==> 4
+        r2 ==> 10
+        writeRef r 11
+        r ==> 11
+        r1 ==> 11
+        r2 ==> 10
+
+    runTestSimple "join + ext" $ do
+        r2 <- newRef $ Just (5 :: Int)
+        r1 <- newRef Nothing
+        rr <- newRef r1
+        let r = join $ readRef rr
+        q <- extRef r maybeLens (False, 0)
+        let q1 = _1 `lensMap` q
+            q2 = _2 `lensMap` q
+        q ==> (False, 0)
+        writeRef r1 $ Just 4
+        q ==> (True, 4)
+        writeRef q1 False
+        r1 ==> Nothing
+        writeRef rr r2
+        q ==> (True, 5)
+        writeRef r1 $ Just 6
+        q ==> (True, 5)
+        r2 ==> Just 5
+        writeRef r2 $ Just 7
+        q ==> (True, 7)
+        r1 ==> Just 6
+        writeRef q1 False
+        r2 ==> Nothing
+        r1 ==> Just 6
+        writeRef q1 True
+        r2 ==> Just 7
+        r1 ==> Just 6
+        writeRef r2 Nothing
+        r1 ==> Just 6
+        q ==> (False, 7)
+        writeRef r1 Nothing
+        q ==> (False, 7)
+
+
+{-
+    runTestSimple "join + lensMap id + ext" $ do
+        r2 <- newRef $ Just (5 :: Int)
+        r1 <- newRef Nothing
+        rr <- newRef $ lensMap id r1
+        let r = lensMap id $ join $ readRef $ lensMap id rr
+        q <- extRef r maybeLens (False, 0)
+        let q1 = _1 `lensMap` q
+            q2 = _2 `lensMap` q
+        q ==> (False, 0)
+        writeRef r1 $ Just 4
+        q ==> (True, 4)
+        writeRef q1 False
+        r1 ==> Nothing
+        writeRef rr r2
+        q ==> (True, 5)
+        writeRef r1 $ Just 6
+        q ==> (True, 5)
+        r2 ==> Just 5
+        writeRef q1 False
+        r2 ==> Nothing
+        r1 ==> Just 6
+        writeRef q1 True
+        r2 ==> Just 5
+        r1 ==> Just 6
+        writeRef r2 Nothing
+        r1 ==> Just 6
+        q ==> (True, 5)
+-}
+    runTestSimple "join + ext 2" $ do
+        r2 <- newRef $ Just (5 :: Int)
+        r1 <- newRef Nothing
+        rr <- newRef True
+        let r = join $ do
+                b <- readRef rr
+                pure $ if b then r1 else r2
+        q <- extRef r maybeLens (False, 0)
+        let q1 = _1 `lensMap` q
+            q2 = _2 `lensMap` q
+        q ==> (False, 0)
+        writeRef r1 $ Just 4
+        q ==> (True, 4)
+        writeRef q1 False
+        r1 ==> Nothing
+        writeRef rr False
+        q ==> (True, 5)
+        writeRef r1 $ Just 6
+        q ==> (True, 5)
+        r2 ==> Just 5
+        writeRef q1 False
+        r2 ==> Nothing
+        r1 ==> Just 6
+        writeRef q1 True
+        r2 ==> Just 5
+        r1 ==> Just 6
+        writeRef r2 Nothing
+        r1 ==> Just 6
+        q ==> (False, 5)
 
     runTestSimple "joinTest2" $ do
         r1 <- newRef (3 :: Int)
@@ -253,6 +361,29 @@ tests runTest = do
         redo === False
         undo === True
 
+    runTestSimple "time" $ do
+        t1 <- newRef "z"
+        r <- newRef "a"
+        q_ <- extRef r (lens fst (\(_, y) x -> (x, ""))) ("","")
+        let q = lensMap _2 q_
+        t2 <- newRef "z"
+        writeRef q "."
+        q ==> "."
+        writeRef t2 "q"
+        q ==> "."
+        writeRef t1 "q"
+        q ==> "."
+
+{- TODO
+    runTestSimple "recursion" $ do
+        r <- newRef "x"
+        rr <- newRef r
+        let r' = join $ readRef rr
+        r' ==> "x"
+        writeRef rr r'
+        r' ==> "x"
+-}
+
     runTest "trivial" (pure ()) $ do
         pure ((), pure ())
 
@@ -267,8 +398,8 @@ tests runTest = do
             message' "Hello d"
             send 1 "f"
             message' "Hello f"
-    --                send 2 "f"
-{-
+
+{- not valid
     runTest "listeners" (do
         listen 1 $ \s -> message $ "Hello " ++ s
         listen 2 $ \s -> message $ "Hi " ++ s
@@ -293,6 +424,7 @@ tests runTest = do
             send 4 "f"
             message' "H f"
 -}
+
     runTest "postponed0" (postponeModification $ message "hello") $ do
         pure $ (,) () $ do
             message' "hello"
@@ -378,9 +510,11 @@ tests runTest = do
             send 1 "a"
             send 2 "b"
             message' "b"
+            send 2 "c"
+            message' "c"
 
 
-    runTest "bla" (do
+    runTest "kill & block" (do
         r <- newRef (0 :: Int)
         _ <- onChangeMemo (readRef r) $ \i -> case i of
             0 -> pure $ do
@@ -405,25 +539,25 @@ tests runTest = do
             send 1 "d"
             message' "Hello d"
             send 1 "f"
-            message' "1"
-            message' "Hello f"
             message' "Kill #0"
             message' "listener #1"
+            message' "1"
+            message' "Hello f"
             send 1 "f"
             error' "message is not received: 1 \"f\""
             send 2 "f"
             message' "Hi f"
             send 2 "g"
-            message' "Hi g"
             message' "listener #2"
+            message' "Hi g"
             send 2 "g"
             error' "message is not received: 2 \"g\""
             send 3 "f"
             error' "message is not received: 3 \"f\""
             send 1 "f"
+            message' "Kill #2"
             message' "1"
             message' "Hello f"
-            message' "Kill #2"
             send 2 "f"
             message' "Hi f"
 
@@ -432,8 +566,8 @@ tests runTest = do
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
-        _ <- onChangeMemo (readRef r) $ \r -> pure $ message $ show r
-        _ <- onChangeMemo (readRef q) $ \r -> pure $ message $ show r
+        _ <- onChange (readRef r) $ message . show
+        _ <- onChange (readRef q) $ message . show
         postponeModification $ writeRef r Nothing
         postponeModification $ writeRef q1 True
         postponeModification $ writeRef q2 1
@@ -487,9 +621,10 @@ tests runTest = do
             message' "x"
             message' "y"
             message' ".."
-            message' "2"
+--- TODO
             message' "1"
-
+            message' "2"
+{- TODO
     runTest "diamond" (do
         r <- newRef "a"
         q <- newRef "b"
@@ -504,7 +639,7 @@ tests runTest = do
             message' "xy"
             message' ".."
             message' "21"
-
+-}
     runTestSimple "ordering" $ do
         t1 <- newRef $ Just (3 :: Int)
         t <- newRef t1
@@ -535,29 +670,8 @@ tests runTest = do
         writeRef q2 1
         r ==> Just 1
 
-    runTestSimple "time" $ do
-        t1 <- newRef "z"
-        r <- newRef "a"
-        q_ <- extRef r (lens fst (\(_, y) x -> (x, ""))) ("","")
-        let q = lensMap _2 q_
-        t2 <- newRef "z"
-        writeRef q "."
-        q ==> "."
-        writeRef t2 "q"
-        q ==> "."
-        writeRef t1 "q"
-        q ==> "."
 
-    runTestSimple "recursion" $ do
-        r <- newRef "x"
-        rr <- newRef r
-        let r' = join $ readRef rr
-        r' ==> "x"
-        writeRef rr r'
-        r' ==> "x"
-
-
-{-
+{- not valid
     runTest "listen-listen" (do
         listen 1 $ \s -> case s of
             "x" -> listen 2 message
