@@ -23,6 +23,9 @@ lens sa sbt afb s = sbt s <$> afb (sa s)
 set :: Lens s t a b -> b -> s -> t
 set l s = runIdentity . l (const $ Identity s)
 
+over :: Lens s t a b -> (a -> b) -> s -> t
+over l f = runIdentity . l (Identity . f)
+
 united :: Lens' a ()
 united f v = fmap (\() -> v) $ f ()
 
@@ -45,6 +48,12 @@ class Field1 s t a b | s -> a, t -> b, s b -> t, t a -> s where
 
 instance Field1 (a,b) (a',b) a a' where
   _1 k ~(a,b) = k a <&> \a' -> (a',b)
+
+instance Field1 (a,b,c) (a',b,c) a a' where
+  _1 k ~(a,b,c) = k a <&> \a' -> (a',b,c)
+
+instance Field1 (a,b,c,d) (a',b,c,d) a a' where
+  _1 k ~(a,b,c,d) = k a <&> \a' -> (a',b,c,d)
 
 infixl 1 <&>
 

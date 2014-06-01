@@ -31,9 +31,10 @@ newtype MonadMonoid m a = MonadMonoid
 instance MonadTrans MonadMonoid where
     lift = MonadMonoid
 
-instance (Applicative m, Monoid a) => Monoid (MonadMonoid m a) where
-    mempty = MonadMonoid $ pure mempty
-    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ liftA2 mappend a b
+-- Applicative would be enough
+instance (Monad m, Monoid a) => Monoid (MonadMonoid m a) where
+    mempty = MonadMonoid $ return mempty
+    MonadMonoid a `mappend` MonadMonoid b = MonadMonoid $ liftM2 mappend a b
 
 
 ------------------------
