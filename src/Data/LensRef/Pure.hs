@@ -20,9 +20,6 @@ module Data.LensRef.Pure
 import Data.Maybe
 import Data.List
 import Debug.Trace
---import Data.Array
---import Data.Function
---import Data.Graph
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
@@ -200,6 +197,16 @@ instance (Monad m, Applicative m) => RefClass (Reference m) where
         , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
 
+{-
+    traversalMap k mr = pure $ Reference
+        { readRef_  = fmap (^. k) $ readRefSimple mr
+        , writeRef_ = \b -> do
+            r <- mr
+            a <- readRef_ r
+            writeRef_ r $ set k b a
+        , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
+        }
+-}
 instance (Monad m, Applicative m) => MonadRefReader (CreateT m) where
     type BaseRef (CreateT m) = Reference m
     liftRefReader = id
@@ -339,18 +346,6 @@ runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ft
 #endif
 
 -------------------------------------
-
-{-
-
-           1 <- 2 -> 3 -> 4
-
-
-        2 <- 1 -> 3
-
-        3 -> 4 -> 2
-
-
--}
 
 comp :: IntMap.IntMap [(Ids, x)] -> Id -> x -> Either [Edge (Id, Ids)] [x]
 comp gr a x = fmap (map (m Map.!)) $ topSort fst m2 (a, mempty)

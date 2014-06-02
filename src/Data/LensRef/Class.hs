@@ -37,7 +37,7 @@ module Data.LensRef.Class
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Trans.Control
-import Control.Lens.Simple (Lens', united)
+import Control.Lens.Simple --(Lens', united)
 
 --------------------------------
 
@@ -63,7 +63,10 @@ class ( MonadRefReader (RefReaderSimple r)
     {- | Apply a lens on a reference.
     -}
     lensMap :: Lens' a b -> RefSimple r a -> RefSimple r b
-
+{-
+    -- proposed by Michael Sloan (experimental)
+    traversalMap :: (Monoid b) => Traversal' a b -> RefSimple r a -> RefSimple r b
+-}
     {- | Associated reference reader monad.
 
     @(RefReaderSimple m)@ is ismoroprhic to @('Reader' x)@ for some @x@.

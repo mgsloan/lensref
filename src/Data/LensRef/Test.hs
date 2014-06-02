@@ -9,6 +9,7 @@ module Data.LensRef.Test
     ) where
 
 import Data.Maybe
+import Data.Traversable
 import Control.Applicative
 import Control.Monad
 import Control.Arrow ((***))
@@ -46,7 +47,15 @@ tests runTest = do
         writeRef r2 0
         r1 ==> 4
         r2 ==> 0
-
+{-
+    runTestSimple "traversalMap" $ do
+        r <- newRef ["a","b","c"]
+        let q = traversalMap traverse r
+        q ==> "abc"
+        writeRef q "x"
+        q ==> "xxx"
+        r ==> ["x","x","x"]
+-}
     runTestSimple "extRefTest" $ do
         r <- newRef $ Just (3 :: Int)
         q <- extRef r maybeLens (False, 0)
