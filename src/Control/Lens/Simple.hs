@@ -14,14 +14,24 @@ import Control.Monad.State
 -----------
 
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
-
 type Lens' s a = Lens s s a a
+
+type Traversal s t a b = forall f. Applicative f => (a -> f b) -> s -> f t 
+type Traversal' s a = Traversal s s a a
+
+type Getting r s a = (a -> Const r a) -> s -> Const r s 
+
+type ASetter s t a b = (a -> Identity b) -> s -> Identity t 
+
+------------
 
 lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
 lens sa sbt afb s = sbt s <$> afb (sa s)
 
-set :: Lens s t a b -> b -> s -> t
-set l s = runIdentity . l (const $ Identity s)
+set :: ASetter s t a b -> b -> s -> t
+set l b = runIdentity . l (\_ -> Identity b)
+--set :: Lens s t a b -> b -> s -> t
+--set l s = runIdentity . l (const $ Identity s)
 
 over :: Lens s t a b -> (a -> b) -> s -> t
 over l f = runIdentity . l (Identity . f)
@@ -31,7 +41,7 @@ united f v = fmap (\() -> v) $ f ()
 
 infixl 8 ^.
 
-(^.) :: a -> Lens' a b -> b
+(^.) :: s -> Getting a s a -> a 
 a ^. l = getConst $ l Const a
 
 view :: MonadReader s m => Lens' s a -> m a
