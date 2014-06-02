@@ -49,7 +49,7 @@ module Data.LensRef
     ) where
 
 import Control.Applicative
-import Control.Lens.Simple (set)
+import Control.Lens.Simple --(set)
 
 import Data.LensRef.Class
 
@@ -133,8 +133,8 @@ instance RefClass r => RefClass (EqRefCore r) where
 
     unitRef = toEqRef unitRef
 
-{-
-data CorrBaseRef r a = CorrBaseRef (r a) (a -> Maybe a{-corrected-})
+
+data CorrBaseRef r a = CorrBaseRef (r a) (a -> RefReaderSimple r (Maybe a{-corrected-}))
 
 type CorrRef r a = RefReaderSimple r (CorrBaseRef r a)
 
@@ -142,7 +142,7 @@ instance RefClass r => RefClass (CorrBaseRef r) where
 
     type (RefReaderSimple (CorrBaseRef r)) = RefReaderSimple r
 
-    readRef = readRef . fromCorrRef
+    readRefSimple = readRefSimple . fromCorrRef
 
     writeRefSimple = writeRefSimple . fromCorrRef
 
@@ -150,22 +150,22 @@ instance RefClass r => RefClass (CorrBaseRef r) where
         a <- readRef m
         CorrBaseRef r k <- m
         lr <- lensMap l $ pure r
-        pure $ CorrBaseRef lr $ \b -> fmap (^. l) $ k $ set l b a
+        pure $ CorrBaseRef lr $ \b -> fmap (fmap (^. l)) $ k $ set l b a
 
-    unitRef = corrRef (const Nothing) unitRef
+    unitRef = corrRef (const $ pure Nothing) unitRef
 
 fromCorrRef :: RefClass r => CorrRef r a -> RefSimple r a
 fromCorrRef m = m >>= \(CorrBaseRef r _) -> pure r
 
-corrRef :: RefClass r => (a -> Maybe a) -> RefSimple r a -> CorrRef r a
+corrRef :: RefClass r => (a -> RefReaderSimple r (Maybe a)) -> RefSimple r a -> CorrRef r a
 corrRef f r = do
     r_ <- r
     pure $ CorrBaseRef r_ f
 
-correction :: RefClass r => CorrRef r a -> RefReaderSimple r (a -> Maybe a)
-correction r = do
+correction :: RefClass r => CorrRef r a -> a -> RefReaderSimple r (Maybe a)
+correction r a = do
     CorrBaseRef _ f <- r
-    pure f
--}
+    f a
+
 
 
