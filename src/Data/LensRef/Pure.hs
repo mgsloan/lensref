@@ -18,11 +18,8 @@ module Data.LensRef.Pure
     ) where
 
 import Data.Maybe
---import Data.List
---import Debug.Trace
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
-import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Control.Applicative
 import Control.Monad
@@ -30,7 +27,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Identity
---import Control.Monad.Trans.Control hiding (StT)
 import Control.Lens.Simple
 
 import Unsafe.Coerce
@@ -41,16 +37,6 @@ import Data.LensRef.Common
 import Data.LensRef.TestEnv hiding (Id)
 import Data.LensRef.Test
 #endif
-
-{-
-Overview
-
-- atomic references
-  - creation -> (read, write, register trigger)
-- triggers
-  - registration -> handler
-
--}
 
 ---------------------------------
 
@@ -178,7 +164,7 @@ joinReg m init a = do
     register r True $ \kill -> do
         runHandler $ kill Kill
         ref <- liftRefReader' m
-        fmap fst $ getHandler' $ register ref init a
+        fmap fst $ getHandler $ register ref init a
     onStatusChange $ \msg -> do
         h <- runRefWriterOfReadT $ liftRefReader $ readRef_ r
         runMonadMonoid $ h msg
@@ -233,7 +219,7 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
         r <- newReference (mempty, error "impossible #4")
         register r True $ \(h, _) -> do
             runHandler $ h Kill
-            getHandler' $ liftRefReader m >>= f
+            getHandler $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
 
     onChangeEq m f = do
@@ -244,7 +230,7 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
               then return it
               else do
                 runHandler $ h' Kill
-                (h, b) <- getHandler' $ f a
+                (h, b) <- getHandler $ f a
                 return ((== a), (h, b))
 
         return $ fmap (snd . snd) $ readRef_ r
@@ -264,21 +250,19 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
                     runHandler $ h2'' Kill
                     runHandler $ h1'' Block
                     runHandler $ h1' Unblock
-                    (h2, b') <- getHandler' m'
+                    (h2, b') <- getHandler m'
                     return (((== a), ((m',h1',h2), b')), it: filter (not . ($ a) . fst) memo)
                 Nothing -> do
                     runHandler $ h2'' Kill
-                    (h1, m') <- getHandler' $ f a
-                    (h2, b') <- getHandler' m'
+                    (h1, m') <- getHandler $ f a
+                    (h2, b') <- getHandler m'
                     return (((== a), ((m',h1,h2), b')), it: memo)
 
 
 ----------------------------------- aux
 
 getTrackingIds :: (Monad m, Applicative m) => HandT m a -> ModifyT m (Ids, a)
-getTrackingIds = RefWriterOfReadT . mapStateT (fmap g . runWriterT)
-  where
-    g ((a,st),ids) = ((ids,a),st)
+getTrackingIds = RefWriterOfReadT . mapStateT (fmap (\((a,st),ids) -> ((ids,a),st)) . runWriterT)
 
 liftRefReader' :: (Monad m, Applicative m) => ReadT m a -> HandT m a
 liftRefReader' = readerToState . mapReaderT (mapWriterT $ return . runIdentity)
@@ -286,10 +270,8 @@ liftRefReader' = readerToState . mapReaderT (mapWriterT $ return . runIdentity)
 dropHandler :: (Monad m, Applicative m) => CreateT m a -> CreateT m a
 dropHandler = mapStateT $ lift . fmap fst . runWriterT
 
-getHandler' :: (Monad m, Applicative m) => CreateT m a -> HandT m (Handler m, a)
-getHandler' = mapStateT $ lift . fmap g . runWriterT
-  where
-    g ((a,st),h) = ((h,a),st)
+getHandler :: (Monad m, Applicative m) => CreateT m a -> HandT m (Handler m, a)
+getHandler = mapStateT $ lift . fmap (\((a,st),h) -> ((h,a),st)) . runWriterT
 
 unsafeGet :: Dyn -> a
 unsafeGet (Dyn a) = unsafeCoerce a
@@ -332,7 +314,7 @@ instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (ReadT m)) wher
     liftRefWriter = id
 
 instance (Monad m, Applicative m) => MonadMemo (CreateT m) where
-    memoRead = memoRead_
+    memoRead = memoRead_ $ \r -> mapStateT lift . runRefWriterOfReadT . writeRefSimple r
 
 instance (Monad m, Applicative m) => MonadRefWriter (CreateT m) where
     liftRefWriter = mapStateT lift . runRefWriterOfReadT
@@ -340,55 +322,51 @@ instance (Monad m, Applicative m) => MonadRefWriter (CreateT m) where
 ------------
 
 -- postpone function
-newtype Inner m a = Inner { runInner :: ReaderT (ModifyT (Inner m) () -> m ()) m a }
-    deriving (Functor, Applicative, Monad, MonadFix)
+type Inner m n = ReaderT (ModifyT m () -> m ()) n
 
-instance MonadTrans Inner where
-    lift = Inner . lift
-
-newtype Register m a = Register { unRegister :: CreateT (Inner m) a }
+newtype Register m a = Register { unRegister :: Inner m (CreateT m) a }
     deriving (Functor, Applicative, Monad, MonadFix)
 
 instance MonadTrans Register where
     lift = Register . lift . lift . lift
 
-instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (ReadT (Inner m))) where
-    type EffectM (RefWriterOf (ReadT (Inner m))) = m
-    liftEffectM = RefWriterOfReadT . lift . lift
-{-
-instance (Monad m, Applicative m) => MonadEffect (CreateT (Inner m)) where
-    type EffectM (CreateT (Inner m)) = m
+instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (ReadT m)) where
+    type EffectM (RefWriterOf (ReadT m)) = m
+    liftEffectM = RefWriterOfReadT . lift
+
+instance (Monad m, Applicative m) => MonadEffect (CreateT m) where
+    type EffectM (CreateT m) = m
     liftEffectM = lift . lift
--}
+
 instance (Monad m, Applicative m) => MonadEffect (Register m) where
     type EffectM (Register m) = m
     liftEffectM = Register . lift . lift . lift
 
 instance (Monad m, Applicative m) => MonadRefReader (Register m) where
-    type BaseRef (Register m) = Reference (Inner m)
-    liftRefReader = Register . liftRefReader
+    type BaseRef (Register m) = Reference m
+    liftRefReader = Register . lift . liftRefReader
 
 instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
-    extRef r l       = Register . extRef r l
-    newRef           = Register . newRef
-    onChange m f    = Register . onChange m $ unRegister . f
-    onChangeEq m f     = Register . onChangeEq m $ unRegister . f
-    onChangeMemo m f = Register . onChangeMemo m $ fmap unRegister . unRegister . f
+    extRef r l       = Register . lift . extRef r l
+    newRef           = Register . lift . newRef
+    onChange r f     = Register $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unRegister) f
+    onChangeEq r f   = Register $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unRegister) f
+    onChangeMemo r f = Register $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unRegister) . flip runReaderT st . unRegister) f
 
 instance (Monad m, Applicative m) => MonadMemo (Register m) where
-    memoRead = memoRead_
+    memoRead = memoRead_ writeRef --fmap (Register . lift) . Register . lift . memoRead . unRegister
 
 instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
-    liftRefWriter = Register . liftRefWriter
+    liftRefWriter = Register . lift . liftRefWriter
 
 --------------------------
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
-    askPostpone = Register . lift . lift . Inner $ ask
+    askPostpone = Register ask
 
     onRegionStatusChange h
-        = Register $ onStatusChange $ runRefWriterOfReadT . liftEffectM . h
+        = Register . lift $ onStatusChange $ runRefWriterOfReadT . liftEffectM . h
 
 runRegister :: (Monad m, Applicative m) => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
@@ -400,7 +378,7 @@ runRegister_ read write m = do
     (a, s) <- run mempty m
     pure $ (,) a $ fmap (const ()) $ run s $ forever $ join $ lift read
   where
-    run s = flip runReaderT (write . Register . liftRefWriter) . runInner . fmap fst . runWriterT . flip runStateT s . unRegister
+    run s = fmap fst . runWriterT . flip runStateT s . flip runReaderT (write . Register . lift . liftRefWriter) . unRegister
 
 
 runTests :: IO ()
@@ -414,42 +392,4 @@ newtype TP = TP { unTP :: Register (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
-
------------------------------------- helper functions
-
--- | topological sorting with starting point
-topSort' :: Ord a => (a -> a -> Bool) -> [a] -> a -> Maybe [a]
-topSort' rel dom a = topSort $ graphMap rel $ Set.toList $ walk f a
-  where
-    f n = filter (flip rel n) dom
- 
--- | topological sorting
-topSort :: Ord n => Map.Map n [n] -> Maybe [n]
-topSort m | Map.null m = Just []
-topSort m = do
-    p <- listToMaybe $ map fst $ filter (null . snd) $ Map.toList m
-    fmap (p:) $ topSort $ Map.map (filter (/= p)) $ Map.delete p m
-
-graphMap :: Ord a => (a -> a -> Bool) -> [a] -> Map.Map a [a]
-graphMap rel domain
-    = Map.fromList [(n, filter (rel n) domain) | n <- domain ]
-
-walk :: Ord a => (a -> [a]) -> a -> Set.Set a
-walk g v = execState (collect v) mempty
-  where
-    collect v = do
-      visited <- gets $ Set.member v
-      when (not visited) $ do
-          modify $ Set.insert v
-          mapM_ collect $ g v
-
-allUnique :: [Int] -> Bool
-allUnique = and . flip evalState mempty . mapM f where
-    f x = state $ \s -> (IntSet.notMember x s, IntSet.insert x s)
-
-readerToState :: (Monad m, Applicative m) => ReaderT s m a -> StateT s m a
-readerToState (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f s
-
-nextKey = maybe 0 ((+1) . fst . fst) . IntMap.maxViewWithKey
-
 

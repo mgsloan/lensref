@@ -12,6 +12,11 @@
 module Data.LensRef.Common where
 
 import Data.Monoid
+import Data.Maybe
+import qualified Data.IntSet as IntSet
+import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
+import qualified Data.Map as Map
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad.State
@@ -95,8 +100,8 @@ future_ f = do
     writeRef s a
     pure a
 -}
-memoRead_ :: (MonadRefWriter m, MonadRefCreator m) => m a -> m (m a) 
-memoRead_ g = do
+memoRead_ :: MonadRefCreator m => (Ref m (Maybe a) -> Maybe a -> m ()) -> m a -> m (m a) 
+memoRead_ writeRef g = do
     s <- newRef Nothing
     pure $ readRef s >>= \x -> case x of
         Just a -> pure a
@@ -113,5 +118,43 @@ memoWrite_ g = do
             writeRef s $ Just (b, a)
             pure a
 -}
+
+
+
+-- | topological sorting with starting point
+topSort' :: Ord a => (a -> a -> Bool) -> [a] -> a -> Maybe [a]
+topSort' rel dom a = topSort $ graphMap rel $ Set.toList $ walk f a
+  where
+    f n = filter (flip rel n) dom
+ 
+-- | topological sorting
+topSort :: Ord n => Map.Map n [n] -> Maybe [n]
+topSort m | Map.null m = Just []
+topSort m = do
+    p <- listToMaybe $ map fst $ filter (null . snd) $ Map.toList m
+    fmap (p:) $ topSort $ Map.map (filter (/= p)) $ Map.delete p m
+
+graphMap :: Ord a => (a -> a -> Bool) -> [a] -> Map.Map a [a]
+graphMap rel domain
+    = Map.fromList [(n, filter (rel n) domain) | n <- domain ]
+
+walk :: Ord a => (a -> [a]) -> a -> Set.Set a
+walk g v = execState (collect v) mempty
+  where
+    collect v = do
+      visited <- gets $ Set.member v
+      when (not visited) $ do
+          modify $ Set.insert v
+          mapM_ collect $ g v
+
+allUnique :: [Int] -> Bool
+allUnique = and . flip evalState mempty . mapM f where
+    f x = state $ \s -> (IntSet.notMember x s, IntSet.insert x s)
+
+readerToState :: (Monad m, Applicative m) => ReaderT s m a -> StateT s m a
+readerToState (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f s
+
+nextKey :: IntMap.IntMap a -> Int
+nextKey = maybe 0 ((+1) . fst . fst) . IntMap.maxViewWithKey
 
 

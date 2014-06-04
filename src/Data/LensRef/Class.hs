@@ -35,6 +35,7 @@ module Data.LensRef.Class
 
 
 import Control.Applicative
+import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.Trans.Control
 import Control.Lens.Simple --(Lens', united)
@@ -159,6 +160,9 @@ For basic usage examples, look into the source of @Data.LensRef.Test@.
 class ( RefClass (BaseRef m)
       , MonadRefReader m
       , MonadMemo m
+      , MonadEffect m
+      , MonadEffect (RefWriter m)
+      , EffectM (RefWriter m) ~ EffectM m
       )
     => MonadRefCreator m where
 
@@ -247,9 +251,6 @@ class ( MonadRefCreator m
 
 -- | Monad for dynamic actions
 class ( MonadRefCreator m
-      , MonadEffect m
-      , MonadEffect (RefWriter m)
-      , EffectM (RefWriter m) ~ EffectM m
       )
     => MonadRegister m where
 
@@ -265,24 +266,28 @@ data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 type RegionStatusChangeHandler m = RegionStatusChange -> m ()
 
 --------------------------------------------------- instances
-
-instance (MonadRefReader m, Monoid w) => MonadRefReader (WriterT w m) where
-    type BaseRef (WriterT w m) = BaseRef m
+{-
+instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
+    type BaseRef (ReaderT w m) = BaseRef m
     liftRefReader = lift . liftRefReader
 
-instance (MonadRefCreator m, Monoid w) => MonadRefCreator (WriterT w m) where
-    extRef r l = lift . extRef r l
-    newRef = lift . newRef
+instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
+    extRef r l       = lift . extRef r l
+    newRef           = lift . newRef
+    onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
+    onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
+    onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
 
-instance (MonadMemo m, Monoid w) => MonadMemo (WriterT w m) where
+instance (MonadMemo m) => MonadMemo (ReaderT w m) where
     memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
 
-instance (MonadEffect m, Monoid w) => MonadEffect (WriterT w m) where
-    type EffectM (WriterT w m) = EffectM m
+instance (MonadEffect m) => MonadEffect (ReaderT w m) where
+    type EffectM (ReaderT w m) = EffectM m
     liftEffectM = lift . liftEffectM
+-}
 {-
-instance (MonadRegister m, Monoid w) => MonadRegister (WriterT w m) where
-    type UpdateM (WriterT w m) = UpdateM m
+instance (MonadRegister m, Monoid w) => MonadRegister (ReaderT w m) where
+    type UpdateM (ReaderT w m) = UpdateM m
     onUpdate r b f = lift $ onUpdate r b f
     askPostpone = lift askPostpone
     onRegionStatusChange g = lift $ onRegionStatusChange g

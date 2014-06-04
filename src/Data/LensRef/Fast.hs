@@ -31,7 +31,7 @@ import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
-import Control.Monad.Trans.Control
+--import Control.Monad.Trans.Control
 import Control.Arrow ((***))
 import Control.Lens.Simple
 
@@ -172,6 +172,8 @@ instance NewRef m => MonadRefWriter (RefCreatorT m) where
 
 instance NewRef m => MonadRefCreator (RefCreatorT m) where
 
+    newRef = RefCreatorT . lift . newRef_
+
     extRef mr r2 a0 = RefCreatorT $ do
         ra <- lift $ newRef' a0
         rqueue <- lift $ newRef' emptyQueue
@@ -199,8 +201,6 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
                     join $ runMorph rqueue $ gets $ sequence_ . queueElems
                     runMorph status $ put True
                 }
-
-    newRef = RefCreatorT . lift . newRef_
 
     onChange (RefReaderTPure x) f = fmap pure $ f x
     onChange mr f = RefCreatorT $ do
@@ -324,17 +324,12 @@ sumQueue = mconcat . queueElems
 -}
 
 instance NewRef m => MonadMemo (RefCreatorT m) where
-    memoRead = memoRead_
+    memoRead = memoRead_ writeRef
 
 ---------------------------------
 
 newtype Register m a
-    = Reg { unReg :: ReaderT ( m () -> m ()         -- postpone to next cycle
-                             , SRef m ( [(Int, m ())]         -- postponed onChangeEq events
---                                      , RegionStatusChange -> MonadMonoid (Register m) ()        -- ??
-                                      )
-                             , SRef m Int -- ticker
-                             )
+    = Reg { unReg :: ReaderT (m () -> m ())         -- postpone to next cycle
                              (RefCreatorT m)
                              a
           }
@@ -348,12 +343,13 @@ instance NewRef m => MonadRefWriter (Register m) where
     liftRefWriter = Reg . lift . liftRefWriter
 
 instance NewRef m => MonadMemo (Register m) where
-    memoRead = memoRead_
+    memoRead = memoRead_ writeRef
 
 instance NewRef m => MonadRefCreator (Register m) where
     extRef r l       = Reg . lift . extRef r l
     newRef           = Reg . lift . newRef
-    onChangeEq r f     = Reg $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unReg) f
+    onChange r f     = Reg $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unReg) f
+    onChangeEq r f   = Reg $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unReg) f
     onChangeMemo r f = Reg $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unReg) . flip runReaderT st . unReg) f
 
 
@@ -361,13 +357,17 @@ instance NewRef m => MonadEffect (Register m) where
     type EffectM (Register m) = m
     liftEffectM = Reg . lift . refCreatorT
 
+instance NewRef m => MonadEffect (RefCreatorT m) where
+    type EffectM (RefCreatorT m) = m
+    liftEffectM = RefCreatorT . lift
+
 instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
     type EffectM (RefWriterOf (RefReaderT m)) = m
     liftEffectM = RefWriterT
 
 instance NewRef m => MonadRegister (Register m) where
 
-    askPostpone = Reg $ ReaderT $ \(st, _, _) -> pure $ st . runRefWriterT
+    askPostpone = Reg $ ReaderT $ \st -> pure $ st . runRefWriterT
 
     onRegionStatusChange g = Reg $ ReaderT $ \_ -> do
         RefCreatorT $ tell $ MonadMonoid . g
@@ -378,17 +378,10 @@ runRegister newChan m = do
     (read, write) <- newChan
     runRegister_ read write m
 
-
 runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write (Reg m) = do
-    tick <- newRef' mempty
-    ticker <- newRef' 0
-    a <- fmap fst $ runWriterT $ runRefCreatorT $ runReaderT m (write, tick, ticker)
-    pure $ (,) a $ forever $ do
-        join read
-        k <- runMorph tick $ state $ \s -> (s, mempty)
-        sequence_ $ map snd $ nubBy ((==) `on` fst) $ sortBy (compare `on` fst) k
---        runMorph ticker $ modify succ
+    a <- fmap fst $ runWriterT $ runRefCreatorT $ runReaderT m write
+    pure $ (,) a $ forever $ join read
 
 --------------------------
 
