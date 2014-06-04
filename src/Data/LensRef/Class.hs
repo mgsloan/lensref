@@ -188,6 +188,12 @@ class ( RefClass (BaseRef m)
     newRef :: a -> m (Ref m a)
     newRef = extRef unitRef united
 
+    onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    -- onChange r f = onChangeMemo r $ pure . f
+
+    onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
+
+
 
 -- | TODO
 class (Monad m, Applicative m) => MonadMemo m where
@@ -244,21 +250,6 @@ class ( MonadRefCreator m
       , EffectM (RefWriter m) ~ EffectM m
       )
     => MonadRegister m where
-{-
-    onChangeAcc
-        :: Eq b
-        => RefReader m b
-        -> b -> (b -> c)
-        -> (b -> b -> c -> m (c -> m c))
-        -> m (RefReader m c)
--}
---    onChange :: Eq a => RefReader m a -> m a
-
-    onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
-    onChange r f = onChangeMemo r $ pure . f
-
-    onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
---    onChangeMemo r f = onChangeAcc r undefined undefined $ \b _ _ -> fmap const $ f b
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 

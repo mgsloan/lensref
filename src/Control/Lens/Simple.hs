@@ -76,6 +76,9 @@ class Field2 s t a b | s -> a, t -> b, s b -> t, t a -> s where
 instance Field2 (a,b) (a,b') b b' where
   _2 k ~(a,b) = k b <&> \b' -> (a,b')
 
+instance Field2 (a,b,c) (a,b',c) b b' where
+  _2 k ~(a,b,c) = k b <&> \b' -> (a,b',c)
+
 instance Field2 (a,b,c,d) (a,b',c,d) b b' where
   _2 k ~(a,b,c,d) = k b <&> \b' -> (a,b',c,d)
 
