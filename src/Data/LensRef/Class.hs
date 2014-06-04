@@ -188,10 +188,10 @@ class ( RefClass (BaseRef m)
     newRef :: a -> m (Ref m a)
     newRef = extRef unitRef united
 
-    onChange_ :: RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChange :: RefReader m a -> (a -> m b) -> m (RefReader m b)
 
-    onChange :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
-    -- onChange r f = onChangeMemo r $ pure . f
+    onChangeEq :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    -- onChangeEq r f = onChangeMemo r $ pure . f
 
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
 

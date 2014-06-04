@@ -229,14 +229,14 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
         dropHandler $ register r True $ \a -> liftRefReader' $ fmap (\b -> set k b a) $ readRefSimple m
         return $ pure r
 
-    onChange_ m f = do
+    onChange m f = do
         r <- newReference (mempty, error "impossible #4")
         register r True $ \(h, _) -> do
             runHandler $ h Kill
             getHandler' $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
 
-    onChange m f = do
+    onChangeEq m f = do
         r <- newReference (const False, (mempty, error "impossible #3"))
         register r True $ \it@(p, (h', _)) -> do
             a <- liftRefReader' m
@@ -371,8 +371,8 @@ instance (Monad m, Applicative m) => MonadRefReader (Register m) where
 instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
     extRef r l       = Register . extRef r l
     newRef           = Register . newRef
-    onChange_ m f    = Register . onChange_ m $ unRegister . f
-    onChange m f     = Register . onChange m $ unRegister . f
+    onChange m f    = Register . onChange m $ unRegister . f
+    onChangeEq m f     = Register . onChangeEq m $ unRegister . f
     onChangeMemo m f = Register . onChangeMemo m $ fmap unRegister . unRegister . f
 
 instance (Monad m, Applicative m) => MonadMemo (Register m) where

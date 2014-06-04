@@ -23,7 +23,7 @@ module Data.LensRef
 
     -- ** Dynamic networks
     , MonadRegister
-    , onChange
+    , onChangeEq
     , onChangeMemo
 
     -- ** Other

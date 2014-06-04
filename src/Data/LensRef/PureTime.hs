@@ -259,7 +259,7 @@ instance (Monad m, Applicative m) => MonadRegister (Register m) where
     onUpdate r b f = Register $ ReaderT $ \ff -> 
         toSend_ r b $ \a b -> mapWriterT (evalRegister' ff) $ f a b
 
-    onChange r f = do
+    onChangeEq r f = do
         a0 <- liftRefReader r
         b0 <- runWriterT $ f a0
         fmap (fmap fst) $ onUpdate r (b0, (m0, a0)) $ \a (b', (kill', rep', a')) ->

@@ -440,7 +440,7 @@ tests runTest = do
 
     runTest "postponed-write" (do
         r <- newRef "x"
-        _ <- onChange (readRef r) message
+        _ <- onChangeEq (readRef r) message
         postponeModification $ writeRef r "y"
             ) $ do
         message' "x"
@@ -449,7 +449,7 @@ tests runTest = do
 
     runTest "postponed" (do
         r <- newRef "x"
-        _ <- onChange (readRef r) message
+        _ <- onChangeEq (readRef r) message
         postponeModification $ writeRef r "x"
         postponeModification $ writeRef r "y"
         pure ()
@@ -458,10 +458,10 @@ tests runTest = do
         pure $ (,) () $ do
             message' "y"
 
-    runTest "onChange" (do
+    runTest "onChangeEq" (do
         r <- newRef "x"
         listen 1 $ writeRef r
-        _ <- onChange (readRef r) message
+        _ <- onChangeEq (readRef r) message
         pure ()
             ) $ do
         message' "listener #0"
@@ -471,12 +471,12 @@ tests runTest = do
             send 1 "y"
             message' "y"
 
-    runTest "onChange + listener" (do
+    runTest "onChangeEq + listener" (do
         r1 <- newRef "x"
         r2 <- newRef "y"
         listen 1 $ writeRef r1
         listen 2 $ writeRef r2
-        _ <- onChange (liftA2 (++) (readRef r1) (readRef r2)) message
+        _ <- onChangeEq (liftA2 (++) (readRef r1) (readRef r2)) message
         pure ()
             ) $ do
         message' "listener #0"
@@ -491,7 +491,7 @@ tests runTest = do
             send 2 "x"
             message' "yx"
 
-    runTest "onChange + join" (do
+    runTest "onChangeEq + join" (do
         r1 <- newRef "x"
         r2 <- newRef "y"
         rr <- newRef r1
@@ -500,7 +500,7 @@ tests runTest = do
         listen 3 $ \i -> case i of
             True  -> writeRef rr r1
             False -> writeRef rr r2
-        _ <- onChange (readRef $ join $ readRef rr) message
+        _ <- onChangeEq (readRef $ join $ readRef rr) message
         pure ()
             ) $ do
         message' "listener #0"
@@ -575,8 +575,8 @@ tests runTest = do
         q <- extRef r maybeLens (False, 0)
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
-        _ <- onChange (readRef r) $ message . show
-        _ <- onChange (readRef q) $ message . show
+        _ <- onChangeEq (readRef r) $ message . show
+        _ <- onChangeEq (readRef q) $ message . show
         postponeModification $ writeRef r Nothing
         postponeModification $ writeRef q1 True
         postponeModification $ writeRef q2 1
@@ -593,10 +593,10 @@ tests runTest = do
 
 --    let r ===> v = liftRefReader r >>= (==? v)
 
-    runTest "onChange value" (do
+    runTest "onChangeEq value" (do
         r <- newRef (0 :: Int)
-        q <- onChange (readRef r) pure
-        _ <- onChange q $ message . show
+        q <- onChangeEq (readRef r) pure
+        _ <- onChangeEq q $ message . show
         postponeModification $ message "a" >> writeRef r 1
         postponeModification $ message "b" >> writeRef r 2
         postponeModification $ message "c" >> writeRef r 3
@@ -618,8 +618,8 @@ tests runTest = do
     runTest "schedule" (do
         r <- newRef "a"
         q <- newRef "b"
-        _ <- onChange (readRef r) message
-        _ <- onChange (readRef q) message
+        _ <- onChangeEq (readRef r) message
+        _ <- onChangeEq (readRef q) message
         postponeModification $ message "." >> writeRef r "x" >> writeRef q "y"
         postponeModification $ message ".." >> writeRef q "1" >> writeRef r "2"
         ) $ do
@@ -637,8 +637,8 @@ tests runTest = do
     runTest "diamond" (do
         r <- newRef "a"
         q <- newRef "b"
-        rq <- onChange (liftA2 (++) (readRef r) (readRef q)) $ pure . pure
-        _ <- onChange (join rq) message
+        rq <- onChangeEq (liftA2 (++) (readRef r) (readRef q)) $ pure . pure
+        _ <- onChangeEq (join rq) message
         postponeModification $ message "." >> writeRef r "x" >> writeRef q "y"
         postponeModification $ message ".." >> writeRef q "1" >> writeRef r "2"
         ) $ do
@@ -715,10 +715,10 @@ tests runTest = do
             message' "hi"
             message' "hi"
 
-    runTest "listen-onChange" (do
+    runTest "listen-onChangeEq" (do
         r <- newRef "k"
         listen 1 $ \s -> case s of
-            "x" -> onChange (readRef r) message >> pure ()
+            "x" -> onChangeEq (readRef r) message >> pure ()
             _ -> writeRef r s
         ) $ do
         message' "listener #0"
