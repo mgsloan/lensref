@@ -124,49 +124,37 @@ newReference a = do
             getVal
 
         , writeRef_ = \a -> do
-            setVal a
-
             st_ <- gets snd
-            let st = IntMap.insert (-1) (UpdateFunState True (i, mempty) undefined) st_
-            let graph = Map.fromList
-                        [ (n, x)
-                        | (n, UpdateFunState True _ x) <- IntMap.toList st
-                        ]
+            let st = IntMap.insert (-1) (UpdateFunState True (i, mempty) $ setVal a) st_
+                dom = [n | (n, UpdateFunState True _ _) <- IntMap.toList st]
                 get n = _dependencies $ st IntMap.! n
                 rel na nb = b `IntSet.member` da && a `IntSet.notMember` db where
                     (a, da) = get na
                     (b, db) = get nb
 
-            l <- maybe (fail "cycle") pure $ topSort' rel (Map.keys graph) (-1)
-
+            l <- maybe (fail "cycle") pure $ topSort' rel dom (-1)
             when (not $ allUnique $ map (fst . get) l) $ fail "cycle"
-            sequence_ $ map (graph Map.!) $ tail l
+            sequence_ $ map (_updateFun . (st IntMap.!)) l
 
         , register = \init upd -> do
             let gv = getTrackingIds $ liftRefReader' (ReadT getVal) >>= upd
             (ih, a) <- liftRefWriter gv
             when init $ setVal a
 
-            let f (vst, st) =
-                    ( hand
-                    , (vst, IntMap.insert ri (UpdateFunState True (i,ih) modReg) st)
-                    )
-                  where
-                    ri = nextKey st
+            ri <- gets $ nextKey . snd
 
-                    hand msg = modify $ over _2 $ IntMap.update ((f msg <*>) . pure) ri
-                      where
-                        f Kill = Nothing
-                        f Block = Just $ set alive False
-                        f Unblock = Just $ set alive True
+            let modReg = do
+                    (ih, a) <- gv
+                    setVal a
+                    modify $ over _2 $ IntMap.adjust (set dependencies (i,ih)) ri
 
-                    modReg = do
-                        (ih, a) <- gv
-                        setVal a
-                        modify $ over _2 $ IntMap.adjust (set dependencies (i,ih)) ri
+            modify $ over _2 $ IntMap.insert ri (UpdateFunState True (i,ih) modReg)
 
-            -- TODO: check uniqueness of ids?
-            tell . (MonadMonoid .) =<< state f
+            let f Kill = Nothing
+                f Block = Just $ set alive False
+                f Unblock = Just $ set alive True
+
+            tell $ \msg -> MonadMonoid $ modify $ over _2 $ IntMap.update ((f msg <*>) . pure) ri
 
         }
 
