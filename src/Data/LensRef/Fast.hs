@@ -202,11 +202,28 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
 
     newRef = RefCreatorT . lift . newRef_
 
+    onChange_ (RefReaderTPure x) f = fmap pure $ f x
+    onChange_ mr f = RefCreatorT $ do
+        v <- lift $ value mr
+        (y, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
+        nr <- lift $ newRef' (h1, y)
+
+        registerOnChange mr $ do
+            (h1_, _) <- runMorph nr get
+            v <- value mr
+            runMonadMonoid $ h1_ Kill
+            (y, h1) <- runWriterT $ runRefCreatorT $ f v
+            runMorph nr $ put (h1, y)
+
+        pure $ RefReaderT
+                { value_ = runMorph nr $ gets snd
+                , registerOnChange_ = registerOnChange mr
+                }
+
     onChange (RefReaderTPure x) f = fmap pure $ f x
     onChange mr f = RefCreatorT $ do
         v <- lift $ value mr
         (y, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
---        ti <- lift $ runMorph ticker $ state $ \s -> (s, succ s)
         nr <- lift $ newRef' (v, (h1, y))
 
         registerOnChange mr $ do
