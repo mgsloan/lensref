@@ -258,6 +258,9 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
                     (h2, b') <- getHandler m'
                     return (((== a), ((m',h1,h2), b')), it: memo)
 
+    onRegionStatusChange h
+        = onStatusChange $ runRefWriterOfReadT . liftEffectM . h
+
 
 ----------------------------------- aux
 
@@ -352,6 +355,7 @@ instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
     onChange r f     = Register $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unRegister) f
     onChangeEq r f   = Register $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unRegister) f
     onChangeMemo r f = Register $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unRegister) . flip runReaderT st . unRegister) f
+    onRegionStatusChange = Register . lift . onRegionStatusChange
 
 instance (Monad m, Applicative m) => MonadMemo (Register m) where
     memoRead = memoRead_ writeRef --fmap (Register . lift) . Register . lift . memoRead . unRegister
@@ -364,9 +368,6 @@ instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
 
     askPostpone = Register ask
-
-    onRegionStatusChange h
-        = Register . lift $ onStatusChange $ runRefWriterOfReadT . liftEffectM . h
 
 runRegister :: (Monad m, Applicative m) => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do

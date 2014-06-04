@@ -275,6 +275,8 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
                 , registerOnChange_ = registerOnChange mr
                 }
 
+    onRegionStatusChange g = RefCreatorT $ tell $ MonadMonoid . g
+
 
 newRef_ a0 = do
     ra <- newRef' a0
@@ -351,6 +353,7 @@ instance NewRef m => MonadRefCreator (Register m) where
     onChange r f     = Reg $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unReg) f
     onChangeEq r f   = Reg $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unReg) f
     onChangeMemo r f = Reg $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unReg) . flip runReaderT st . unReg) f
+    onRegionStatusChange = Reg . lift . onRegionStatusChange
 
 
 instance NewRef m => MonadEffect (Register m) where
@@ -368,10 +371,6 @@ instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
 instance NewRef m => MonadRegister (Register m) where
 
     askPostpone = Reg $ ReaderT $ \st -> pure $ st . runRefWriterT
-
-    onRegionStatusChange g = Reg $ ReaderT $ \_ -> do
-        RefCreatorT $ tell $ MonadMonoid . g
-
 
 runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do

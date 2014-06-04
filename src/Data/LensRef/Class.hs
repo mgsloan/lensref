@@ -199,6 +199,8 @@ class ( RefClass (BaseRef m)
 
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
 
+    onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
+
 
 
 -- | TODO
@@ -249,12 +251,8 @@ class ( MonadRefCreator m
 -}
 
 
--- | Monad for dynamic actions
-class ( MonadRefCreator m
-      )
-    => MonadRegister m where
-
-    onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
+-- | TODO
+class MonadRefCreator m => MonadRegister m where        -- MonadPostpone
 
     askPostpone :: m (RefWriter m () -> EffectM m ())
 
