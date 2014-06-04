@@ -120,32 +120,32 @@ memoWrite_ g = do
             pure a
 -}
 
-
+---------------------------------
 
 -- | topological sorting with starting point
-topSort' :: Ord a => (a -> a -> Bool) -> [a] -> a -> Maybe [a]
-topSort' rel dom a = topSort $ graphMap rel $ Set.toList $ walk f a
+topSort' :: (Int -> Int -> Bool) -> [Int] -> Int -> Maybe [Int]
+topSort' rel dom a = topSort $ graphMap rel $ IntSet.toList $ walk f a
   where
     f n = filter (flip rel n) dom
  
 -- | topological sorting
-topSort :: Ord n => Map.Map n [n] -> Maybe [n]
-topSort m | Map.null m = Just []
+topSort :: IntMap.IntMap [Int] -> Maybe [Int]
+topSort m | IntMap.null m = Just []
 topSort m = do
-    p <- listToMaybe $ map fst $ filter (null . snd) $ Map.toList m
-    fmap (p:) $ topSort $ Map.map (filter (/= p)) $ Map.delete p m
+    p <- listToMaybe $ map fst $ filter (null . snd) $ IntMap.toList m
+    fmap (p:) $ topSort $ IntMap.map (filter (/= p)) $ IntMap.delete p m
 
-graphMap :: Ord a => (a -> a -> Bool) -> [a] -> Map.Map a [a]
+graphMap :: (Int -> Int -> Bool) -> [Int] -> IntMap.IntMap [Int]
 graphMap rel domain
-    = Map.fromList [(n, filter (rel n) domain) | n <- domain ]
+    = IntMap.fromList [(n, filter (rel n) domain) | n <- domain ]
 
-walk :: Ord a => (a -> [a]) -> a -> Set.Set a
+walk :: (Int -> [Int]) -> Int -> IntSet.IntSet
 walk g v = execState (collect v) mempty
   where
     collect v = do
-      visited <- gets $ Set.member v
+      visited <- gets $ IntSet.member v
       when (not visited) $ do
-          modify $ Set.insert v
+          modify $ IntSet.insert v
           mapM_ collect $ g v
 
 allUnique :: [Int] -> Bool

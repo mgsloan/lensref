@@ -21,7 +21,7 @@ module Data.LensRef.Pure
 import Data.Maybe
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
-import qualified Data.Map as Map
+--import qualified Data.Map as Map
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
@@ -283,13 +283,7 @@ runHandler :: (Monad m, Applicative m) => MonadMonoid (StateT (St m) m) () -> Ha
 runHandler = mapStateT lift . runMonadMonoid
 
 ----------------------------------------- lenses
-{-
-refValue :: Lens' (ReferenceState m) Dyn
-refValue k (ReferenceState a b) = k a <&> \a' -> ReferenceState a' b
 
-updateFunctions :: Lens' (ReferenceState m) (IntMap.IntMap (UpdateFunState m))
-updateFunctions k (ReferenceState a b) = k b <&> \b' -> ReferenceState a b'
--}
 dependencies :: Lens' (UpdateFunState m) (Id, Ids)
 dependencies k (UpdateFunState a b c) = k b <&> \b' -> UpdateFunState a b' c
 
