@@ -22,6 +22,7 @@ import Control.Concurrent
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
+import Control.Lens.Simple
 
 import System.IO.Unsafe
 
@@ -151,10 +152,30 @@ allUnique :: [Int] -> Bool
 allUnique = and . flip evalState mempty . mapM f where
     f x = state $ \s -> (IntSet.notMember x s, IntSet.insert x s)
 
-readerToState :: (Monad m, Applicative m) => ReaderT s m a -> StateT s m a
-readerToState (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f s
+readerToState :: (Monad m, Applicative m) => (s -> r) -> ReaderT r m a -> StateT s m a
+readerToState g (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f $ g s
 
 nextKey :: IntMap.IntMap a -> Int
 nextKey = maybe 0 ((+1) . fst . fst) . IntMap.maxViewWithKey
 
+---------------------
+
+type Queue a = IntMap.IntMap (Bool{-False: blocked-}, a)
+
+emptyQueue :: Queue a
+emptyQueue = IntMap.empty
+
+queueElems :: Queue a -> [a]
+queueElems = map snd . filter fst . IntMap.elems
+
+addElem :: a -> Queue a -> ((Queue a -> a, RegionStatusChange -> Queue a -> ([a], Queue a)), Queue a)
+addElem a as = ((getElem, delElem), IntMap.insert i (True,a) as)
+  where
+    i = maybe 0 ((+1) . fst . fst) $ IntMap.maxViewWithKey as
+
+    getElem is = snd $ is IntMap.! i
+
+    delElem Kill is = ([], IntMap.delete i is)
+    delElem Block is = ([], IntMap.adjust ((set _1) False) i is)
+    delElem Unblock is = (map snd $ maybeToList $ IntMap.lookup i is, IntMap.adjust ((set _1) True) i is)
 

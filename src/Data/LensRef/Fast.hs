@@ -22,16 +22,11 @@ module Data.LensRef.Fast
     , runTests
     ) where
 
-import Data.Maybe
 import Data.Monoid
-import Data.Function
-import Data.List
-import qualified Data.IntMap as IMap
 import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
---import Control.Monad.Trans.Control
 import Control.Arrow ((***))
 import Control.Lens.Simple
 
@@ -51,6 +46,28 @@ data RefReaderT m a
             -- the action will be executed after each value change
         }
     | RefReaderTPure a
+
+newtype instance RefWriterOf (RefReaderT m) a
+    = RefWriterT { runRefWriterT :: m a }
+        deriving (Monad, MonadFix, Applicative, Functor)
+
+type RefWriterT m = RefWriterOf (RefReaderT m)
+
+data RefCore_ (m :: * -> *) a = RefCore_ 
+    { readPart  :: RefReaderT m a
+    , writePart :: a -> RefWriterT m ()
+    }
+
+newtype RefCreatorT m a = RefCreatorT
+    { runRefCreatorT :: WriterT (RegionStatusChangeHandler (MonadMonoid m)) m a
+    }
+        deriving (Monad, MonadFix, Applicative, Functor)
+
+newtype Register m a
+    = Reg { unReg :: ReaderT (m () -> m ()) (RefCreatorT m) a }
+        deriving (Monad, Applicative, Functor, MonadFix)
+
+-------------------------
 
 value (RefReaderTPure a) = pure a
 value x = value_ x
@@ -101,54 +118,13 @@ instance NewRef m => Monad (RefReaderT m) where
                 innerhandler inst
         }
 
-newtype instance RefWriterOf (RefReaderT m) a = RefWriterT
-    { runRefWriterT :: m a
-    }
-        deriving (Monad, MonadFix, Applicative, Functor)
-
-type RefWriterT m = RefWriterOf (RefReaderT m)
-
-data RefCore_ (m :: * -> *) a = RefCore_ 
-    { readPart  :: RefReaderT m a
-    , writePart :: a -> RefWriterT m ()
-    }
-
-instance NewRef m => MonadRefReader (RefReaderT m) where
-
-    type BaseRef (RefReaderT m) = RefCore_ m
-
-    liftRefReader = id
-
-instance NewRef m => MonadRefReader (RefWriterOf (RefReaderT m)) where
-
-    type BaseRef (RefWriterOf (RefReaderT m)) = RefCore_ m
-
-    liftRefReader = RefWriterT . value
-
-
-newtype RefCreatorT m a = RefCreatorT
-    { runRefCreatorT :: WriterT (RegionStatusChangeHandler (MonadMonoid m)) m a
-    }
-        deriving (Monad, MonadFix, Applicative, Functor)
-
-refCreatorT m = RefCreatorT
-    { runRefCreatorT = lift m
-    }
-
-instance NewRef m => MonadRefReader (RefCreatorT m) where
-
-    type BaseRef (RefCreatorT m) = RefCore_ m
-
-    liftRefReader = refCreatorT . value
-
-
-join_ = join   
+refCreatorT = RefCreatorT . lift
 
 instance NewRef m => RefClass (RefCore_ m) where
 
     type RefReaderSimple (RefCore_ m) = RefReaderT m
 
-    readRefSimple = join_ . fmap readPart
+    readRefSimple = join . fmap readPart
 
     writeRefSimple mr a
         = liftRefReader mr >>= flip writePart a
@@ -162,13 +138,6 @@ instance NewRef m => RefClass (RefCore_ m) where
                 { readPart  = pure ()
                 , writePart = const $ pure ()
                 }
-
-
-instance NewRef m => MonadRefWriter (RefWriterOf (RefReaderT m)) where
-    liftRefWriter = id
-
-instance NewRef m => MonadRefWriter (RefCreatorT m) where
-    liftRefWriter = RefCreatorT . lift . runRefWriterT
 
 instance NewRef m => MonadRefCreator (RefCreatorT m) where
 
@@ -247,7 +216,6 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
         v <- lift $ value mr
         (my, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
         (y, h2) <- lift $ runWriterT $ runRefCreatorT my
---        ti <- lift $ runMorph ticker $ state $ \s -> (s, succ s)
         nr <- lift $ newRef' ((v, ((my, h1, h2), y)), [])
 
         registerOnChange mr $ do
@@ -296,46 +264,28 @@ addElem' r a q = f *** id $ addElem a q where
         as <- runMorph r $ StateT $ \s -> pure $ del inst s
         sequence_ as
 
+---------------------------------
 
-type Queue a = IMap.IntMap (Bool{-False: blocked-}, a)
+instance NewRef m => MonadRefReader (RefReaderT m) where
+    type BaseRef (RefReaderT m) = RefCore_ m
+    liftRefReader = id
 
-emptyQueue :: Queue a
-emptyQueue = IMap.empty
+instance NewRef m => MonadRefReader (RefWriterOf (RefReaderT m)) where
+    type BaseRef (RefWriterOf (RefReaderT m)) = RefCore_ m
+    liftRefReader = RefWriterT . value
 
-queueElems :: Queue a -> [a]
-queueElems = map snd . filter fst . IMap.elems
-{-
-mapMQueue :: (Monad m) => (a -> m b) -> Queue a -> m (Queue b)
-mapMQueue f (j, xs) = do
-    vs <- mapM (f . snd) xs
-    pure (j, zip (map fst xs) vs)
--}
-addElem :: a -> Queue a -> ((Queue a -> a, RegionStatusChange -> Queue a -> ([a], Queue a)), Queue a)
-addElem a as = ((getElem, delElem), IMap.insert i (True,a) as)
-  where
-    i = maybe 0 ((+1) . fst . fst) $ IMap.maxViewWithKey as
+instance NewRef m => MonadRefReader (RefCreatorT m) where
+    type BaseRef (RefCreatorT m) = RefCore_ m
+    liftRefReader = refCreatorT . value
 
-    getElem is = snd $ is IMap.! i
---    delElem _ is = ([], is)  -- !!!
-    delElem Kill is = ([], IMap.delete i is)
-    delElem Block is = ([], IMap.adjust ((set _1) False) i is)
-    delElem Unblock is = (map snd $ maybeToList $ IMap.lookup i is, IMap.adjust ((set _1) True) i is)
-{-
-sumQueue :: Monoid a => Queue a -> a
-sumQueue = mconcat . queueElems
--}
+instance NewRef m => MonadRefWriter (RefWriterOf (RefReaderT m)) where
+    liftRefWriter = id
+
+instance NewRef m => MonadRefWriter (RefCreatorT m) where
+    liftRefWriter = RefCreatorT . lift . runRefWriterT
 
 instance NewRef m => MonadMemo (RefCreatorT m) where
     memoRead = memoRead_ writeRef
-
----------------------------------
-
-newtype Register m a
-    = Reg { unReg :: ReaderT (m () -> m ())         -- postpone to next cycle
-                             (RefCreatorT m)
-                             a
-          }
-        deriving (Monad, Applicative, Functor, MonadFix)
 
 instance NewRef m => MonadRefReader (Register m) where
     type BaseRef (Register m) = RefCore_ m
@@ -369,8 +319,9 @@ instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
     liftEffectM = RefWriterT
 
 instance NewRef m => MonadRegister (Register m) where
-
     askPostpone = Reg $ ReaderT $ \st -> pure $ st . runRefWriterT
+
+--------------------------
 
 runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
@@ -395,4 +346,5 @@ newtype TP = TP { unTP :: Prog TP () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
+
 
