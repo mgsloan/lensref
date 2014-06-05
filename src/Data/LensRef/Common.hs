@@ -13,10 +13,9 @@ module Data.LensRef.Common where
 
 import Data.Monoid
 import Data.Maybe
+import Data.List
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
-import qualified Data.Set as Set
-import qualified Data.Map as Map
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad.State
@@ -122,31 +121,44 @@ memoWrite_ g = do
 
 ---------------------------------
 
--- | topological sorting with starting point
-topSort' :: (Int -> Int -> Bool) -> [Int] -> Int -> Maybe [Int]
-topSort' rel dom a = topSort $ graphMap rel $ IntSet.toList $ walk f a
-  where
-    f n = filter (flip rel n) dom
+-- | topological sorting on component
+topSortComponent
+    :: (Int -> [Int])   -- ^ children
+    -> Int              -- ^ starting point
+    -> Maybe [Int]
+topSortComponent ch a = topSort ch (walk ch a) [a]
  
 -- | topological sorting
-topSort :: IntMap.IntMap [Int] -> Maybe [Int]
-topSort m | IntMap.null m = Just []
-topSort m = do
-    p <- listToMaybe $ map fst $ filter (null . snd) $ IntMap.toList m
-    fmap (p:) $ topSort $ IntMap.map (filter (/= p)) $ IntMap.delete p m
-
-graphMap :: (Int -> Int -> Bool) -> [Int] -> IntMap.IntMap [Int]
-graphMap rel domain
-    = IntMap.fromList [(n, filter (rel n) domain) | n <- domain ]
-
-walk :: (Int -> [Int]) -> Int -> IntSet.IntSet
-walk g v = execState (collect v) mempty
+topSort
+    :: (Int -> [Int])       -- ^ children
+    -> IntMap.IntMap [Int]  -- ^ parents
+    -> [Int]                -- ^ sources
+    -> Maybe [Int]
+topSort _ par []
+    | IntMap.null par = Just []
+    | otherwise = Nothing
+topSort ch par (p:ps) = fmap (p:) $ topSort ch par' $ merge ps ys
   where
-    collect v = do
-      visited <- gets $ IntSet.member v
-      when (not visited) $ do
-          modify $ IntSet.insert v
-          mapM_ collect $ g v
+    xs = ch p
+    par' = foldr (IntMap.adjust $ filter (/= p)) (IntMap.delete p par) xs
+    ys = sort $ filter (null . (par' IntMap.!)) xs    -- TODO: eliminate sort
+
+merge :: Ord a => [a] -> [a] -> [a]
+merge [] xs = xs
+merge xs [] = xs
+merge (x:xs) (y:ys) = case compare x y of
+    LT -> x: merge xs (y:ys)
+    GT -> y: merge (x:xs) ys
+    EQ -> x: merge xs ys
+
+walk :: (Int -> [Int]) -> Int -> IntMap.IntMap [Int]
+walk ch v = execState (collects v) $ IntMap.singleton v []
+  where
+    collects v = mapM_ (collect v) $ ch v
+    collect p v = do
+      visited <- gets $ IntMap.member v
+      modify $ IntMap.alter (Just . (p:) . fromMaybe []) v
+      when (not visited) $ collects v
 
 allUnique :: [Int] -> Bool
 allUnique = and . flip evalState mempty . mapM f where

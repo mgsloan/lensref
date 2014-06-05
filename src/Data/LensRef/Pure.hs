@@ -19,8 +19,8 @@ module Data.LensRef.Pure
     ) where
 
 import Data.Maybe
-import qualified Data.IntSet as IntSet
-import qualified Data.IntMap as IntMap
+import qualified Data.IntSet as Set
+import qualified Data.IntMap as Map
 --import qualified Data.Map as Map
 import Control.Applicative
 import Control.Monad
@@ -30,6 +30,7 @@ import Control.Monad.Writer
 import Control.Monad.Identity
 import Control.Lens.Simple
 
+import Debug.Trace
 import Unsafe.Coerce
 
 import Data.LensRef.Class
@@ -45,7 +46,7 @@ import Data.LensRef.Test
 type Id = Int
 
 -- set of identifiers
-type Ids = IntSet.IntSet
+type Ids = Set.IntSet
 
 -- collecting identifiers of references on whose values the return value depends on
 type TrackedT = WriterT Ids
@@ -73,20 +74,24 @@ type ModifyT m = RefWriterOf (ReadT m)
 -- invariant property: the St state is only exteded, not changed
 type CreateT m = HandlerT m (StateT (St m) m)
 
-type St m = (ValSt, TriggerSt m)
+type St m = (ValSt, TriggerSt m, RevMap)
 
 -- values of references
-type ValSt = IntMap.IntMap Dyn
+type ValSt = Map.IntMap Dyn
 
 -- dynamic value
 data Dyn where Dyn :: a -> Dyn
 
 -- triggers
-type TriggerSt m = IntMap.IntMap (UpdateFunState m)
+type TriggerSt m = Map.IntMap (UpdateFunState m)
+
+-- reverse dependencies for efficiency
+-- x `elem` revmap ! s   <==>  s `elem` ((triggerst ! x) ^. dependencies . _2)
+type RevMap = Map.IntMap Ids
 
 data UpdateFunState m = UpdateFunState
     { _alive :: Bool
-    , _dependencies :: (Id, Ids)
+    , _dependencies :: (Id, Ids)    -- (i, dependencies of i)
     , _updateFun :: ModifyT m ()    -- what to run if at least one of the dependency changes
     }
 
@@ -109,52 +114,80 @@ newtype Register m a = Register { unRegister :: Inner m (CreateT m) a }
 
 newReference :: (Monad m, Applicative m) => a -> CreateT m (Reference m a)
 newReference a = do
-    i <- gets $ nextKey . fst
-
-    let getVal = asks $ unsafeGet . fromMaybe (error "fatal: cant find ref value") . IntMap.lookup i
+    i <- gets $ nextKey . (^. _1)
+{- show resource info
+    (aa,bb,cc) <- get
+    let info m = Map.size m
+    traceShowM (info aa, (info bb, sum $ map (Set.size . snd . _dependencies) $ Map.elems bb), (info cc, sum $ map Set.size $ Map.elems cc))
+-}
+    let getVal = asks $ unsafeGet . fromMaybe (error "fatal: cant find ref value") . Map.lookup i
 
         setVal :: MonadState (St n) m => a -> m ()
-        setVal a = modify $ over _1 $ IntMap.insert i $ Dyn a
+        setVal a = modify $ over _1 $ Map.insert i $ Dyn a
 
     setVal a
 
     pure Reference
         { readRef_ = ReadT $ do
-            lift . tell $ IntSet.singleton i
+            lift . tell $ Set.singleton i
             getVal
 
         , writeRef_ = \a -> do
-            st_ <- gets snd
-            let st = IntMap.insert (-1) (UpdateFunState True (i, mempty) $ setVal a) st_
-                dom = [n | (n, UpdateFunState True _ _) <- IntMap.toList st]
-                get n = _dependencies $ st IntMap.! n
-                rel na nb = b `IntSet.member` da && a `IntSet.notMember` db where
-                    (a, da) = get na
-                    (b, db) = get nb
+            st_ <- gets (^. _2)
+            revmap <- gets (^. _3)
+            let st = Map.insert (-1) (UpdateFunState True (i, mempty) $ setVal a) st_
 
-            l <- maybe (fail "cycle") pure $ topSort' rel dom (-1)
-            when (not $ allUnique $ map (fst . get) l) $ fail "cycle"
-            sequence_ $ map (_updateFun . (st IntMap.!)) l
+                gr = children . _dependencies . (st Map.!)
+                children (b, db) =
+                     [ na
+                     | na <- maybe [] Set.toList $ Map.lookup b revmap
+                     , let (UpdateFunState alive (a, _) _) = st Map.! na
+                     , alive
+                     , a `Set.notMember` db
+                     ]
+
+            l <- maybe (fail "cycle") pure $ topSortComponent gr (-1)
+--            when (not $ allUnique $ map (fst . _dependencies . (st Map.!)) l) $ fail "cycle"
+            sequence_ $ map (_updateFun . (st Map.!)) l
 
         , register = \init upd -> do
             let gv = getTrackingIds $ liftRefReader' (ReadT getVal) >>= upd
             (ih, a) <- liftRefWriter gv
             when init $ setVal a
 
-            ri <- gets $ nextKey . snd
+            ri <- gets $ nextKey . (^. _2)
+
+            -- needed only for efficiency
+            let changeRev f = over _3 . Map.unionWith f . Map.fromSet (const $ Set.singleton ri)
 
             let modReg = do
                     (ih, a) <- gv
                     setVal a
-                    modify $ over _2 $ IntMap.adjust (set dependencies (i,ih)) ri
 
-            modify $ over _2 $ IntMap.insert ri (UpdateFunState True (i,ih) modReg)
+                    -- needed only for efficiency
+                    ih' <- gets $ (^. _2) . (^. dependencies) . (Map.! ri) . (^. _2)
+                    modify $ changeRev (flip Set.difference) $ ih' `Set.difference` ih
+                    modify $ changeRev Set.union $ ih `Set.difference` ih'
 
-            let f Kill = Nothing
-                f Block = Just $ set alive False
+                    modify $ over _2 $ Map.adjust (set dependencies (i,ih)) ri
+
+            modify $ over _2 $ Map.insert ri (UpdateFunState True (i,ih) modReg)
+
+            -- needed only for efficiency
+            modify $ changeRev Set.union ih
+
+            let f Kill    = Nothing
+                f Block   = Just $ set alive False
                 f Unblock = Just $ set alive True
 
-            tell $ \msg -> MonadMonoid $ modify $ over _2 $ IntMap.update ((f msg <*>) . pure) ri
+            tell $ \msg -> MonadMonoid $ do
+
+                    -- needed only for efficiency
+                    when (msg == Kill) $ do
+                        ih' <- gets $ fromMaybe mempty . fmap ((^. _2) . (^. dependencies)) . Map.lookup ri . (^. _2)
+                        modify $ changeRev (flip Set.difference) ih'
+
+                    modify $ over _2 $ Map.update ((f msg <*>) . pure) ri
 
         }
 
@@ -268,7 +301,7 @@ getTrackingIds :: (Monad m, Applicative m) => HandT m a -> ModifyT m (Ids, a)
 getTrackingIds = RefWriterOfReadT . mapStateT (fmap (\((a,st),ids) -> ((ids,a),st)) . runWriterT)
 
 liftRefReader' :: (Monad m, Applicative m) => ReadT m a -> HandT m a
-liftRefReader' = readerToState fst . mapReaderT (mapWriterT $ return . runIdentity) . runReadT
+liftRefReader' = readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runReadT
 
 dropHandler :: (Monad m, Applicative m) => CreateT m a -> CreateT m a
 dropHandler = lift . fmap fst . runWriterT
@@ -294,7 +327,7 @@ alive k (UpdateFunState a b c) = k a <&> \a' -> UpdateFunState a' b c
 
 instance (Monad m, Applicative m) => MonadRefReader (CreateT m) where
     type BaseRef (CreateT m) = Reference m
-    liftRefReader = lift . readerToState fst . mapReaderT (return . fst . runWriter) . runReadT
+    liftRefReader = lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runReadT
 
 instance (Monad m, Applicative m) => MonadRefReader (ReadT m) where
     type BaseRef (ReadT m) = Reference m
@@ -302,7 +335,7 @@ instance (Monad m, Applicative m) => MonadRefReader (ReadT m) where
 
 instance (Monad m, Applicative m) => MonadRefReader (RefWriterOf (ReadT m)) where
     type BaseRef (RefWriterOf (ReadT m)) = Reference m
-    liftRefReader = RefWriterOfReadT . readerToState fst . mapReaderT (return . fst . runWriter) . runReadT
+    liftRefReader = RefWriterOfReadT . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runReadT
 
 instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (ReadT m)) where
     liftRefWriter = id

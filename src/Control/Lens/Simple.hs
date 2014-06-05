@@ -53,6 +53,13 @@ l .= a = modify $ set l a
 magnify :: Monad m => Lens' a b -> ReaderT b m c -> ReaderT a m c
 magnify l (ReaderT f) = ReaderT $ \a -> f $ a ^. l
 
+infixl 1 <&>
+
+(<&>) :: Functor f => f a -> (a -> b) -> f b
+as <&> f = f <$> as
+
+---------------------------------
+
 class Field1 s t a b | s -> a, t -> b, s b -> t, t a -> s where
     _1 :: Lens s t a b
 
@@ -64,11 +71,6 @@ instance Field1 (a,b,c) (a',b,c) a a' where
 
 instance Field1 (a,b,c,d) (a',b,c,d) a a' where
   _1 k ~(a,b,c,d) = k a <&> \a' -> (a',b,c,d)
-
-infixl 1 <&>
-
-(<&>) :: Functor f => f a -> (a -> b) -> f b
-as <&> f = f <$> as
 
 class Field2 s t a b | s -> a, t -> b, s b -> t, t a -> s where
     _2 :: Lens s t a b
@@ -82,4 +84,9 @@ instance Field2 (a,b,c) (a,b',c) b b' where
 instance Field2 (a,b,c,d) (a,b',c,d) b b' where
   _2 k ~(a,b,c,d) = k b <&> \b' -> (a,b',c,d)
 
+class Field3 s t a b | s -> a, t -> b, s b -> t, t a -> s where
+    _3 :: Lens s t a b
+
+instance Field3 (a,b,c) (a,b,c') c c' where
+  _3 k ~(a,b,c) = k c <&> \c' -> (a,b,c')
 
