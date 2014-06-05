@@ -15,8 +15,9 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer hiding (listen, Any)
 import Control.Monad.Operational
+import Control.Monad.Identity
 import qualified Data.Sequence as Seq
-import Control.Lens hiding ((|>), view)
+import Control.Lens.Simple hiding (view)
 
 import Unsafe.Coerce
 
@@ -45,7 +46,6 @@ data Inst t a where
     NewId :: Inst t Int
 
 type Prog t = ProgramT (Inst t) (State (Int, Seq.Seq Any))
-
 
 ---------------------------------------------------
 
@@ -127,7 +127,10 @@ data Listener m = forall a . Show a => Listener
     , _listenerStatus :: RegionStatusChange
     , _listenerCallback :: a -> Prog m ()
     }
-makeLenses ''Listener
+--makeLenses ''Listener
+
+listenerId :: Lens' (Listener m) Id
+listenerId k (Listener a b c d) = k a <&> \a' -> Listener a' b c d
 
 data ST m = ST
     { _postponed :: [m]
@@ -135,7 +138,19 @@ data ST m = ST
     , _idcounter :: Int
     , _vars :: (Int, Seq.Seq Any)
     }
-makeLenses ''ST
+--makeLenses ''ST
+
+postponed :: Lens' (ST m) [m]
+postponed k (ST a b c d) = k a <&> \a' -> ST a' b c d
+
+listeners :: Lens' (ST m) [Listener m]
+listeners k (ST a b c d) = k b <&> \b' -> ST a b' c d
+
+idcounter :: Lens' (ST m) Int
+idcounter k (ST a b c d) = k c <&> \c' -> ST a b c' d
+
+vars :: Lens' (ST m) (Int, Seq.Seq Any)
+vars k (ST a b c d) = k d <&> \d' -> ST a b c d'
 
 
 coeval_ :: forall a b m

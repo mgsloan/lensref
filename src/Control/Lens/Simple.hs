@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 -- | Minimalized lens dependency. Compatible with the lens package.
 module Control.Lens.Simple where
 
@@ -16,10 +17,15 @@ import Control.Monad.State
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 type Lens' s a = Lens s s a a
 
+type LensLike f s t a b = (a -> f b) -> s -> f t 
+type LensLike' f s a = LensLike f s s a a 
+
 type Traversal s t a b = forall f. Applicative f => (a -> f b) -> s -> f t 
 type Traversal' s a = Traversal s s a a
 
 type Getting r s a = (a -> Const r a) -> s -> Const r s 
+
+type Setting p s t a b = p a (Identity b) -> s -> Identity t 
 
 type ASetter s t a b = (a -> Identity b) -> s -> Identity t 
 
@@ -33,8 +39,20 @@ set l b = runIdentity . l (\_ -> Identity b)
 --set :: Lens s t a b -> b -> s -> t
 --set l s = runIdentity . l (const $ Identity s)
 
-over :: Lens s t a b -> (a -> b) -> s -> t
+over :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
 over l f = runIdentity . l (Identity . f)
+
+use :: MonadState s m => Getting a s a -> m a
+use l = gets (view l)
+
+to :: (s -> a) -> Getting r s a
+to f g s = Const $ getConst $ g $ f s
+--to f g s = Const $ f s
+
+infixr 4 %~
+
+(%~) :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
+(%~) = over
 
 united :: Lens' a ()
 united f v = fmap (\() -> v) $ f ()
@@ -44,14 +62,35 @@ infixl 8 ^.
 (^.) :: s -> Getting a s a -> a 
 a ^. l = getConst $ l Const a
 
-view :: MonadReader s m => Lens' s a -> m a
-view l = asks (^. l)
+------------------------- State
 
-(.=) :: MonadState s m => Lens' s a -> a -> m ()
+infix 4 %=
+
+(%=) :: (p ~ (->), MonadState s m) => Setting p s s a b -> p a b -> m ()
+l %= f = modify (l %~ f)
+
+(.=) :: MonadState s m => ASetter s s a b -> b -> m ()
 l .= a = modify $ set l a
+
+--------------------------- Reader
+
+infixr 2 `zoom`, `magnify`
 
 magnify :: Monad m => Lens' a b -> ReaderT b m c -> ReaderT a m c
 magnify l (ReaderT f) = ReaderT $ \a -> f $ a ^. l
+
+--instance Zoom m n s t => Zoom (ReaderT e m) (ReaderT e n) s t where
+
+zoom :: Monad m => Lens' s t -> StateT t m a -> StateT s m a
+--zoom :: Monad m => Lens' s t -> ReaderT t m a -> ReaderT s m a
+zoom l (StateT m) = StateT $ \s -> liftM (over _2 $ \t -> set l t s) $ m $ s ^. l
+--zoom l (ReaderT m) = ReaderT (zoom l . m)
+
+view :: MonadReader s m => Getting a s a -> m a 
+view l = asks (^. l)
+
+
+----------------------
 
 infixl 1 <&>
 

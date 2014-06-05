@@ -1,18 +1,16 @@
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
--- {-# OPTIONS_HADDOCK hide #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
 
 TODO
-- elim mem leak: registered events don't allow to release unused refs
 - optimiziation: do not remember values
 - optimiziation: equality check
 -}
@@ -22,304 +20,396 @@ module Data.LensRef.Fast
     , runTests
     ) where
 
-import Data.Monoid
+-- import Data.Monoid
+import Data.Maybe
+import qualified Data.Set as Set
+--import qualified Data.Map as Map
 import Control.Applicative hiding (empty)
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
-import Control.Monad.Reader
-import Control.Arrow ((***))
+--import Control.Monad.Identity
 import Control.Lens.Simple
+
+
+import Unsafe.Coerce
 
 import Data.LensRef.Class
 import Data.LensRef.Common
 #ifdef __TESTS__
-import Data.LensRef.TestEnv hiding (listen)
+import Data.LensRef.TestEnv hiding (listen, Id)
 import Data.LensRef.Test
 #endif
 
 ----------------------
 
+-- dynamic value
+data Dyn where Dyn :: a -> Dyn
+
+-- Each atomic reference has a unique identifier
+type Id m = OrdRef m (Dyn, TIds m)   -- (value, reverse deps)
+
+-- trigger id
+type TId m = OrdRef m (UpdateFunState m)
+
+-- set of identifiers
+type Ids m = Set.Set (Id m)
+type TIds m = Set.Set (TId m)
+
+-- collecting identifiers of references on whose values the return runRefReaderT depends on
+type TrackedT m = WriterT (Ids m)
+
+-- Handlers are added on trigger registration.
+-- The registered triggers may be killed, blocked and unblocked via the handler.
+-- invariant property: in the St state the ... is changed only
+type Handler m = RegionStatusChangeHandler (MonadMonoid m)
+
+-- collecting handlers
+type HandlerT n m = WriterT (Handler n) m
+
 data RefReaderT m a
-    = RefReaderT
-        { value_ :: m a
-        , registerOnChange_ :: m () -> WriterT (RegionStatusChangeHandler (MonadMonoid m)) m ()
-            -- the action will be executed after each value change
-        }
+    = RefReaderT { runRefReaderT_ :: TrackedT m m a }
     | RefReaderTPure a
+
+
+type HandT m = TrackedT m m
 
 newtype instance RefWriterOf (RefReaderT m) a
     = RefWriterT { runRefWriterT :: m a }
-        deriving (Monad, MonadFix, Applicative, Functor)
+        deriving (Monad, Applicative, Functor, MonadFix)
 
 type RefWriterT m = RefWriterOf (RefReaderT m)
 
-data RefCore_ (m :: * -> *) a = RefCore_ 
-    { readPart  :: RefReaderT m a
-    , writePart :: a -> RefWriterT m ()
+
+type RefCreatorT m = HandlerT m m
+
+
+
+
+
+
+
+
+
+
+
+
+
+data UpdateFunState m = UpdateFunState
+    { _alive :: Bool
+    , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
+    , _updateFun :: RefWriterT m ()    -- what to run if at least one of the dependency changes
     }
 
-newtype RefCreatorT m a = RefCreatorT
-    { runRefCreatorT :: WriterT (RegionStatusChangeHandler (MonadMonoid m)) m a
+data Reference m a = Reference
+    { readRef_  :: RefReaderT m a        
+    , writeRef_ :: a -> RefWriterT m ()
+    , register
+        :: Bool                 -- True: run the following function initially
+        -> (a -> HandT m a)     -- trigger to be registered
+        -> RefCreatorT m ()         -- emits a handler
     }
-        deriving (Monad, MonadFix, Applicative, Functor)
 
-newtype Register m a
-    = Reg { unReg :: ReaderT (m () -> m ()) (RefCreatorT m) a }
-        deriving (Monad, Applicative, Functor, MonadFix)
+-- postpone function
+type Inner m n = ReaderT (RefWriterT m () -> m ()) n
+
+newtype Register m a = Register { unRegister :: Inner m (RefCreatorT m) a }
+    deriving (Functor, Applicative, Monad, MonadFix)
 
 -------------------------
 
-value (RefReaderTPure a) = pure a
-value x = value_ x
-
-registerOnChange (RefReaderTPure _) = firstTime $ const $ pure $ const $ pure ()
-registerOnChange x = registerOnChange_ x
-
-firstTime f y = do
-    _ <- lift y
-    h <- lift $ f y
-    tell h
-
-
-instance (Monad m, Applicative m) => Functor (RefReaderT m) where
+instance NewRef m => Functor (RefReaderT m) where
     fmap f (RefReaderTPure x) = RefReaderTPure $ f x
     fmap f mr = RefReaderT
-        { value_ = fmap f $ value mr
-        , registerOnChange_ = registerOnChange mr
+        { runRefReaderT_ = fmap f $ runRefReaderT mr
         }
 
 instance NewRef m => Applicative (RefReaderT m) where
     pure a = RefReaderTPure a
     RefReaderTPure f <*> RefReaderTPure a = RefReaderTPure $ f a
     mf <*> ma = RefReaderT
-        { value_ = value mf <*> value ma
-        , registerOnChange_ = liftA2 f (registerOnChange mf) (registerOnChange ma)
+        { runRefReaderT_ = runRefReaderT mf <*> runRefReaderT ma
         }
-      where
-        f (WriterT m1) (WriterT m2) = WriterT $ liftA2 mappend m1 m2
 
 instance NewRef m => Monad (RefReaderT m) where
-
     return a = pure a
-
     RefReaderTPure r >>= f = f r
     mr >>= f = RefReaderT
-        { value_ = value mr >>= value . f
-        , registerOnChange_ = \action -> do
-            r <- lift $ newRef' $ const $ pure ()
-            registerOnChange mr $ do
-                runMorph r $ StateT $ \innerhandler -> do
-                    runMonadMonoid $ innerhandler Kill
-                    v <- value mr
-                    newinnerhandler <- execWriterT $ registerOnChange (f v) action
-                    pure ((), newinnerhandler)
-            tell $ \inst -> do
-                innerhandler <- lift $ runMorph r get
-                innerhandler inst
+        { runRefReaderT_ = runRefReaderT mr >>= runRefReaderT . f
         }
 
-refCreatorT = RefCreatorT . lift
+runRefReaderT (RefReaderTPure a) = pure a
+runRefReaderT x = runRefReaderT_ x
 
-instance NewRef m => RefClass (RefCore_ m) where
+------------------------------
 
-    type RefReaderSimple (RefCore_ m) = RefReaderT m
+newReference :: forall m a . NewRef m => a -> RefCreatorT m (Reference m a)
+newReference a = do
+    ir <- lift $ newOrdRef (Dyn a, mempty)
 
-    readRefSimple = join . fmap readPart
 
-    writeRefSimple mr a
-        = liftRefReader mr >>= flip writePart a
 
-    lensMap k = fmap $ \(RefCore_ r w) -> RefCore_
-            { readPart  = fmap (^. k) r
-            , writePart = \b -> liftRefReader r >>= w . set k b
-            }
 
-    unitRef = pure RefCore_
-                { readPart  = pure ()
-                , writePart = const $ pure ()
-                }
+
+
+    let getVal :: m a
+        getVal = runOrdRef ir $ gets $ unsafeGet . (^. _1)
+        setVal :: a -> m ()
+        setVal = runOrdRef ir . modify . set _1 . Dyn
+
+
+
+    pure Reference
+        { readRef_ = RefReaderT $ do
+            tell $ Set.singleton ir
+            lift getVal
+
+        , writeRef_ = \a -> RefWriterT $ do
+
+
+            -- TODO: elim this
+            m1 <- newOrdRef $ UpdateFunState True (ir, mempty) $ RefWriterT $ setVal a
+
+            let gr :: TId m -> m [TId m]
+                gr n = children =<< runOrdRef n (gets _dependencies)
+
+                children :: (Id m, Ids m) -> m [TId m]
+                children (b, db) = do
+                    nas <- runOrdRef b $ gets snd
+                    fmap concat $ forM (Set.toList nas) $ \na -> do
+                        UpdateFunState alive (a, _) _ <- runOrdRef na get
+                        pure $ if alive && a `Set.notMember` db
+                            then [na]
+                            else []
+
+            l <- maybe (fail "cycle") pure =<< topSortComponentM gr m1
+
+            forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ gets $ _updateFun
+
+        , register = \init upd -> do
+
+            let gv = runWriterT $ lift getVal >>= upd
+
+
+            (a, ih) <- lift gv
+            when init $ lift $ setVal a
+
+            ri <- lift $ newOrdRef $ UpdateFunState True (ir, ih) undefined
+
+            let addRev, delRev :: Id m -> m ()
+                addRev x = runOrdRef x $ modify $ over _2 $ Set.insert ri
+                delRev x = runOrdRef x $ modify $ over _2 $ Set.delete ri
+
+            let modReg = do
+                    (a, ih) <- gv
+                    setVal a
+
+
+                    ih' <- runOrdRef ri $ gets $ (^. _2) . (^. dependencies)
+                    mapM_ delRev $ Set.toList $ ih' `Set.difference` ih
+                    mapM_ addRev $ Set.toList $ ih `Set.difference` ih'
+
+                    runOrdRef ri $ modify $ set dependencies (ir, ih)
+
+            lift $ runOrdRef ri $ modify $ set updateFun $ RefWriterT modReg
+
+
+            lift $ mapM_ addRev $ Set.toList ih
+
+            let f Kill    = id
+                f Block   = set alive False
+                f Unblock = set alive True
+
+            tell $ \msg -> MonadMonoid $ do
+
+
+                    when (msg == Kill) $ do
+                        ih' <- runOrdRef ri $ gets $ (^. _2) . (^. dependencies)
+                        mapM_ delRev $ Set.toList ih'
+
+                    runOrdRef ri $ modify $ f msg
+        }
+
+
+joinReg :: NewRef m => RefReaderT m (Reference m a) -> Bool -> (a -> HandT m a) -> RefCreatorT m ()
+joinReg m init a = do
+    r <- newReference mempty
+    register r True $ \kill -> do
+        runHandler $ kill Kill
+        ref <- liftRefReader' m
+        fmap fst $ getHandler $ register ref init a
+    tell $ \msg -> MonadMonoid $ do
+        h <- runRefWriterT $ liftRefReader $ readRef_ r
+        runMonadMonoid $ h msg
+
+instance NewRef m => RefClass (Reference m) where
+    type RefReaderSimple (Reference m) = RefReaderT m
+
+    unitRef = pure $ Reference
+        { readRef_  = pure ()
+        , writeRef_ = const $ pure ()
+        , register  = const $ const $ pure ()
+        }
+
+    readRefSimple = join . fmap readRef_
+
+    writeRefSimple mr a = do
+        r <- liftRefReader mr
+        writeRef_ r a
+
+    lensMap k mr = pure $ Reference
+        { readRef_  = fmap (^. k) $ readRefSimple mr
+        , writeRef_ = \b -> do
+            r <- liftRefReader mr
+            a <- liftRefReader $ readRef_ r
+            writeRef_ r $ set k b a
+        , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
+        }
 
 instance NewRef m => MonadRefCreator (RefCreatorT m) where
 
-    newRef = RefCreatorT . lift . newRef_
+    newRef = fmap pure . newReference
 
-    extRef mr r2 a0 = RefCreatorT $ do
-        ra <- lift $ newRef' a0
-        rqueue <- lift $ newRef' emptyQueue
-        status <- lift $ newRef' True -- True: normal; False:
+    extRef m k a0 = do
+        r <- newReference a0
+        -- TODO: remove dropHandler?
+        dropHandler $ joinReg m False $ \_ -> liftRefReader' $ fmap (^. k) $ readRef_ r
+        dropHandler $ register r True $ \a -> liftRefReader' $ fmap (\b -> set k b a) $ readRefSimple m
+        return $ pure r
 
-        lift $ fmap fst $ runWriterT $ registerOnChange (readRefSimple mr) $ do
-            s <- runMorph status get
-            when s $ do
-                b <- value $ readRefSimple mr
-                runMorph ra $ modify $ set r2 b
-                runMorph status $ put False
-                join $ runMorph rqueue $ gets $ sequence_ . queueElems
-                runMorph status $ put True
+    onChange m f = do
+        r <- newReference (mempty, error "impossible #4")
+        register r True $ \(h, _) -> do
+            runHandler $ h Kill
+            getHandler $ liftRefReader m >>= f
+        return $ fmap snd $ readRef $ pure r
 
-        pure $
-            pure RefCore_
-                { readPart = RefReaderT
-                    { value_ = runMorph ra get
-                    , registerOnChange_ = firstTime $ runMorph rqueue . state . addElem' rqueue
-                    }
-                , writePart = \a -> RefWriterT $ do
-                    runMorph ra $ put a
-                    runMorph status $ put False
-                    runRefWriterT $ writeRefSimple mr $ a ^. r2
-                    join $ runMorph rqueue $ gets $ sequence_ . queueElems
-                    runMorph status $ put True
-                }
+    onChangeEq m f = do
+        r <- newReference (const False, (mempty, error "impossible #3"))
+        register r True $ \it@(p, (h', _)) -> do
+            a <- liftRefReader' m
+            if p a
+              then return it
+              else do
+                runHandler $ h' Kill
+                (h, b) <- getHandler $ f a
+                return ((== a), (h, b))
 
-    onChange (RefReaderTPure x) f = fmap pure $ f x
-    onChange mr f = RefCreatorT $ do
-        v <- lift $ value mr
-        (y, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
-        nr <- lift $ newRef' (h1, y)
+        return $ fmap (snd . snd) $ readRef_ r
 
-        registerOnChange mr $ do
-            (h1_, _) <- runMorph nr get
-            v <- value mr
-            runMonadMonoid $ h1_ Kill
-            (y, h1) <- runWriterT $ runRefCreatorT $ f v
-            runMorph nr $ put (h1, y)
+    onChangeMemo mr f = do
+        r <- newReference ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
+        register r True upd
+        return $ fmap (snd . snd . fst) $ readRef_ r
+      where
+        upd st@((p, ((m'',h1'',h2''), _)), memo) = do
+            let it = (p, (m'', h1''))
+            a <- liftRefReader' mr
+            if p a
+              then return st
+              else case listToMaybe [ b | (p, b) <- memo, p a] of
+                Just (m',h1') -> do
+                    runHandler $ h2'' Kill
+                    runHandler $ h1'' Block
+                    runHandler $ h1' Unblock
+                    (h2, b') <- getHandler m'
+                    return (((== a), ((m',h1',h2), b')), it: filter (not . ($ a) . fst) memo)
+                Nothing -> do
+                    runHandler $ h2'' Kill
+                    (h1, m') <- getHandler $ f a
+                    (h2, b') <- getHandler m'
+                    return (((== a), ((m',h1,h2), b')), it: memo)
 
-        pure $ RefReaderT
-                { value_ = runMorph nr $ gets snd
-                , registerOnChange_ = registerOnChange mr
-                }
-
-    onChangeEq (RefReaderTPure x) f = fmap pure $ f x
-    onChangeEq mr f = RefCreatorT $ do
-        v <- lift $ value mr
-        (y, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
-        nr <- lift $ newRef' (v, (h1, y))
-
-        registerOnChange mr $ do
-              (vold, (h1_, _)) <- runMorph nr get
-              v <- value mr
-              if v == vold
-                  then pure ()
-                  else do
-                    runMonadMonoid $ h1_ Kill
-                    (y, h1) <- runWriterT $ runRefCreatorT $ f v
-                    runMorph nr $ put (v, (h1, y))
-
-        pure $ RefReaderT
-                { value_ = runMorph nr $ gets $ snd . snd
-                , registerOnChange_ = registerOnChange mr
-                }
+    onRegionStatusChange h
+        = tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
 
-    onChangeMemo (RefReaderTPure x) f = fmap pure $ join $ f x
-    onChangeMemo mr f = RefCreatorT $ do
-        v <- lift $ value mr
-        (my, h1) <- lift $ runWriterT $ runRefCreatorT $ f v
-        (y, h2) <- lift $ runWriterT $ runRefCreatorT my
-        nr <- lift $ newRef' ((v, ((my, h1, h2), y)), [])
+-------------------- aux
 
-        registerOnChange mr $ do
-              ((vold, dat@((_, h1_, h2_), _)), others) <- runMorph nr get
-              v <- value mr
-              let others' = la: others
-                  la = (vold, dat)
-              if v == vold
-                  then pure ()
-                  else do
-                    runMonadMonoid $ h1_ Block
-                    runMonadMonoid $ h2_ Kill
-                    case lookup v others of
-                      Just ((my, h1, _), _) -> do
-                        runMonadMonoid $ h1 Unblock
-                        (y, h2) <- runWriterT $ runRefCreatorT my
-                        runMorph nr $ put ((v, ((my, h1, h2), y)), filter ((/=v) . fst) $ others')
-                      Nothing -> do
-                        (my, h1) <- runWriterT $ runRefCreatorT $ f v
-                        (y, h2) <- runWriterT $ runRefCreatorT my
-                        runMorph nr $ put ((v, ((my, h1, h2), y)), others')
+liftRefReader' :: NewRef m => RefReaderT m a -> HandT m a
+liftRefReader' = runRefReaderT
 
-        pure $ RefReaderT
-                { value_ = runMorph nr $ gets $ snd . snd . fst
-                , registerOnChange_ = registerOnChange mr
-                }
+dropHandler :: NewRef m => RefCreatorT m a -> RefCreatorT m a
+dropHandler = lift . fmap fst . runWriterT
 
-    onRegionStatusChange g = RefCreatorT $ tell $ MonadMonoid . g
+getHandler :: NewRef m => RefCreatorT m a -> HandT m (Handler m, a)
+getHandler = lift . fmap (\(a,h)->(h,a)) . runWriterT
 
+unsafeGet :: Dyn -> a
+unsafeGet (Dyn a) = unsafeCoerce a
 
-newRef_ a0 = do
-    ra <- newRef' a0
-    rqueue <- newRef' emptyQueue
-    pure $ pure RefCore_
-            { readPart = RefReaderT
-                { value_ = runMorph ra get
-                , registerOnChange_ = firstTime $ runMorph rqueue . state . addElem' rqueue
-                }
-            , writePart = \a -> RefWriterT $ do
-                runMorph ra $ put a
-                join $ runMorph rqueue $ gets $ sequence_ . queueElems
-            }
+runHandler :: NewRef m => MonadMonoid m () -> HandT m ()
+runHandler = lift . runMonadMonoid
 
-addElem' r a q = f *** id $ addElem a q where
-    f (_, del) inst = MonadMonoid $ do
-        as <- runMorph r $ StateT $ \s -> pure $ del inst s
-        sequence_ as
+-------------- lenses
 
----------------------------------
+dependencies :: Lens' (UpdateFunState m) (Id m, Ids m)
+dependencies k (UpdateFunState a b c) = k b <&> \b' -> UpdateFunState a b' c
+
+alive :: Lens' (UpdateFunState m) Bool
+alive k (UpdateFunState a b c) = k a <&> \a' -> UpdateFunState a' b c
+
+updateFun :: Lens' (UpdateFunState m) (RefWriterT m ())
+updateFun k (UpdateFunState a b c) = k c <&> \c' -> UpdateFunState a b c'
+
+-------------------------------------------------------
+
+instance NewRef m => MonadRefReader (RefCreatorT m) where
+    type BaseRef (RefCreatorT m) = Reference m
+    liftRefReader = lift . fmap fst . runWriterT . runRefReaderT
 
 instance NewRef m => MonadRefReader (RefReaderT m) where
-    type BaseRef (RefReaderT m) = RefCore_ m
+    type BaseRef (RefReaderT m) = Reference m
     liftRefReader = id
 
 instance NewRef m => MonadRefReader (RefWriterOf (RefReaderT m)) where
-    type BaseRef (RefWriterOf (RefReaderT m)) = RefCore_ m
-    liftRefReader = RefWriterT . value
-
-instance NewRef m => MonadRefReader (RefCreatorT m) where
-    type BaseRef (RefCreatorT m) = RefCore_ m
-    liftRefReader = refCreatorT . value
+    type BaseRef (RefWriterOf (RefReaderT m)) = Reference m
+    liftRefReader = RefWriterT . fmap fst . runWriterT . runRefReaderT
 
 instance NewRef m => MonadRefWriter (RefWriterOf (RefReaderT m)) where
     liftRefWriter = id
 
-instance NewRef m => MonadRefWriter (RefCreatorT m) where
-    liftRefWriter = RefCreatorT . lift . runRefWriterT
-
 instance NewRef m => MonadMemo (RefCreatorT m) where
-    memoRead = memoRead_ writeRef
+    memoRead = memoRead_ $ \r -> lift . runRefWriterT . writeRefSimple r
 
-instance NewRef m => MonadRefReader (Register m) where
-    type BaseRef (Register m) = RefCore_ m
-    liftRefReader = Reg . lift . liftRefReader
+instance NewRef m => MonadRefWriter (RefCreatorT m) where
+    liftRefWriter = lift . runRefWriterT
 
-instance NewRef m => MonadRefWriter (Register m) where
-    liftRefWriter = Reg . lift . liftRefWriter
-
-instance NewRef m => MonadMemo (Register m) where
-    memoRead = memoRead_ writeRef
-
-instance NewRef m => MonadRefCreator (Register m) where
-    extRef r l       = Reg . lift . extRef r l
-    newRef           = Reg . lift . newRef
-    onChange r f     = Reg $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unReg) f
-    onChangeEq r f   = Reg $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unReg) f
-    onChangeMemo r f = Reg $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unReg) . flip runReaderT st . unReg) f
-    onRegionStatusChange = Reg . lift . onRegionStatusChange
-
-
-instance NewRef m => MonadEffect (Register m) where
-    type EffectM (Register m) = m
-    liftEffectM = Reg . lift . refCreatorT
-
-instance NewRef m => MonadEffect (RefCreatorT m) where
-    type EffectM (RefCreatorT m) = m
-    liftEffectM = RefCreatorT . lift
+instance MonadTrans Register where
+    lift = Register . lift . lift
 
 instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
     type EffectM (RefWriterOf (RefReaderT m)) = m
     liftEffectM = RefWriterT
 
+instance NewRef m => MonadEffect (RefCreatorT m) where
+    type EffectM (RefCreatorT m) = m
+    liftEffectM = lift
+
+instance NewRef m => MonadEffect (Register m) where
+    type EffectM (Register m) = m
+    liftEffectM = lift
+
+instance NewRef m => MonadRefReader (Register m) where
+    type BaseRef (Register m) = Reference m
+    liftRefReader = Register . lift . liftRefReader
+
+instance NewRef m => MonadRefCreator (Register m) where
+    extRef r l       = Register . lift . extRef r l
+    newRef           = Register . lift . newRef
+    onChange r f     = Register $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unRegister) f
+    onChangeEq r f   = Register $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unRegister) f
+    onChangeMemo r f = Register $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unRegister) . flip runReaderT st . unRegister) f
+    onRegionStatusChange = Register . lift . onRegionStatusChange
+
+instance NewRef m => MonadMemo (Register m) where
+    memoRead = memoRead_ writeRef --fmap (Register . lift) . Register . lift . memoRead . unRegister
+
+instance NewRef m => MonadRefWriter (Register m) where
+    liftRefWriter = Register . lift . liftRefWriter
+
 instance NewRef m => MonadRegister (Register m) where
-    askPostpone = Reg $ ReaderT $ \st -> pure $ st . runRefWriterT
+    askPostpone = Register ask
 
 --------------------------
 
@@ -328,23 +418,21 @@ runRegister newChan m = do
     (read, write) <- newChan
     runRegister_ read write m
 
-runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
-runRegister_ read write (Reg m) = do
-    a <- fmap fst $ runWriterT $ runRefCreatorT $ runReaderT m write
-    pure $ (,) a $ forever $ join read
+runRegister_ :: NewRef m => (m (RefWriterT m ())) -> (RefWriterT m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ read write m = do
+    a <- fmap fst $ runWriterT $ flip runReaderT (write . liftRefWriter) $ unRegister m
+    pure $ (,) a $ forever $ join $ fmap runRefWriterT read
 
---------------------------
 
 runTests :: IO ()
 #ifdef __TESTS__
 runTests = tests runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name TP $ \r w -> runRegister_ (fmap unTP r) (w . TP)
+runTest name = runTest_ name (TP . RefWriterT) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
-newtype TP = TP { unTP :: Prog TP () }
+newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
-
 

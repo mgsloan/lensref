@@ -4,26 +4,27 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
 {- |
 Reference implementation for the "Data.LensRef.Class" interface.
 
 The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 -}
+
+
 module Data.LensRef.Pure
     ( Register
     , runRegister
     , runTests
     ) where
 
+-- import Data.Monoid
 import Data.Maybe
 import qualified Data.IntSet as Set
 import qualified Data.IntMap as Map
---import qualified Data.Map as Map
 import Control.Applicative
-import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
@@ -42,14 +43,21 @@ import Data.LensRef.Test
 
 ---------------------------------
 
+-- dynamic value
+data Dyn where Dyn :: a -> Dyn
+
 -- Each atomic reference has a unique identifier
-type Id = Int
+type Id (m :: * -> *) = Int
+
+-- trigger id
+type TId (m :: * -> *) = Int
 
 -- set of identifiers
-type Ids = Set.IntSet
+type Ids (m :: * -> *) = Set.IntSet
+type TIds (m :: * -> *) = Set.IntSet
 
 -- collecting identifiers of references on whose values the return value depends on
-type TrackedT = WriterT Ids
+type TrackedT m = WriterT (Ids m)
 
 -- Handlers are added on trigger registration.
 -- The registered triggers may be killed, blocked and unblocked via the handler.
@@ -59,85 +67,87 @@ type Handler m = RegionStatusChangeHandler (MonadMonoid (StateT (St m) m))
 -- collecting handlers
 type HandlerT n m = WriterT (Handler n) m
 
-newtype ReadT (m :: * -> *) a = ReadT { runReadT :: ReaderT ValSt (TrackedT Identity) a }
+newtype RefReaderT (m :: * -> *) a
+    = RefReaderT { runRefReaderT :: ReaderT ValSt (TrackedT m Identity) a }
         deriving (Monad, Applicative, Functor, MonadReader ValSt)
 
 -- invariant property: the values in St state are not changed, the state may be extended
-type HandT m = StateT (St m) (TrackedT m)
+type HandT m = StateT (St m) (TrackedT m m)
 
-newtype instance RefWriterOf (ReadT m) a
-    = RefWriterOfReadT { runRefWriterOfReadT :: StateT (St m) m a }
+newtype instance RefWriterOf (RefReaderT m) a
+    = RefWriterT { runRefWriterT :: StateT (St m) m a }
         deriving (Monad, Applicative, Functor, MonadState (St m))
 
-type ModifyT m = RefWriterOf (ReadT m)
+type RefWriterT m = RefWriterOf (RefReaderT m)
 
 -- invariant property: the St state is only exteded, not changed
-type CreateT m = HandlerT m (StateT (St m) m)
+type RefCreatorT m = HandlerT m (StateT (St m) m)
 
-type St m = (ValSt, TriggerSt m, RevMap)
+type St m = (ValSt, TriggerSt m, RevMap m)
 
 -- values of references
 type ValSt = Map.IntMap Dyn
-
--- dynamic value
-data Dyn where Dyn :: a -> Dyn
 
 -- triggers
 type TriggerSt m = Map.IntMap (UpdateFunState m)
 
 -- reverse dependencies for efficiency
 -- x `elem` revmap ! s   <==>  s `elem` ((triggerst ! x) ^. dependencies . _2)
-type RevMap = Map.IntMap Ids
+type RevMap m = Map.IntMap (TIds m)
 
 data UpdateFunState m = UpdateFunState
     { _alive :: Bool
-    , _dependencies :: (Id, Ids)    -- (i, dependencies of i)
-    , _updateFun :: ModifyT m ()    -- what to run if at least one of the dependency changes
+    , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
+    , _updateFun :: RefWriterT m ()    -- what to run if at least one of the dependency changes
     }
 
 data Reference m a = Reference
-    { readRef_  :: ReadT m a        
-    , writeRef_ :: a -> ModifyT m ()
+    { readRef_  :: RefReaderT m a        
+    , writeRef_ :: a -> RefWriterT m ()
     , register
         :: Bool                 -- True: run the following function initially
         -> (a -> HandT m a)     -- trigger to be registered
-        -> CreateT m ()         -- emits a handler
+        -> RefCreatorT m ()         -- emits a handler
     }
 
 -- postpone function
-type Inner m n = ReaderT (ModifyT m () -> m ()) n
+type Inner m n = ReaderT (RefWriterT m () -> m ()) n
 
-newtype Register m a = Register { unRegister :: Inner m (CreateT m) a }
+newtype Register m a = Register { unRegister :: Inner m (RefCreatorT m) a }
     deriving (Functor, Applicative, Monad, MonadFix)
 
 -------------------------------------
 
-newReference :: (Monad m, Applicative m) => a -> CreateT m (Reference m a)
+newReference :: forall m a . (Monad m, Applicative m) => a -> RefCreatorT m (Reference m a)
 newReference a = do
-    i <- gets $ nextKey . (^. _1)
+    ir <- gets $ nextKey . (^. _1)
 {- show resource info
     (aa,bb,cc) <- get
     let info m = Map.size m
     traceShowM (info aa, (info bb, sum $ map (Set.size . snd . _dependencies) $ Map.elems bb), (info cc, sum $ map Set.size $ Map.elems cc))
 -}
-    let getVal = asks $ unsafeGet . fromMaybe (error "fatal: cant find ref value") . Map.lookup i
-
-        setVal :: MonadState (St n) m => a -> m ()
-        setVal a = modify $ over _1 $ Map.insert i $ Dyn a
+    let
+        getVal = asks $ unsafeGet . fromMaybe (error "fatal: cant find ref value") . Map.lookup ir
+        setVal :: MonadState (St m) n => a -> n ()
+        setVal a = modify $ over _1 $ Map.insert ir $ Dyn a
 
     setVal a
 
     pure Reference
-        { readRef_ = ReadT $ do
-            lift . tell $ Set.singleton i
+        { readRef_ = RefReaderT $ do
+            lift . tell $ Set.singleton ir
             getVal
 
         , writeRef_ = \a -> do
             st_ <- gets (^. _2)
             revmap <- gets (^. _3)
-            let st = Map.insert (-1) (UpdateFunState True (i, mempty) $ setVal a) st_
+
+            let st = Map.insert (-1) (UpdateFunState True (ir, mempty) $ setVal a) st_
+
 
                 gr = children . _dependencies . (st Map.!)
+
+                children :: (Id m, Ids m) -> [TId m]
                 children (b, db) =
                      [ na
                      | na <- maybe [] Set.toList $ Map.lookup b revmap
@@ -151,8 +161,11 @@ newReference a = do
             sequence_ $ map (_updateFun . (st Map.!)) l
 
         , register = \init upd -> do
-            let gv = getTrackingIds $ liftRefReader' (ReadT getVal) >>= upd
-            (ih, a) <- liftRefWriter gv
+
+            let gv = RefWriterT . mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT)
+                        $ liftRefReader' (RefReaderT getVal) >>= upd
+
+            (a, ih) <- liftRefWriter gv
             when init $ setVal a
 
             ri <- gets $ nextKey . (^. _2)
@@ -160,8 +173,9 @@ newReference a = do
             -- needed only for efficiency
             let changeRev f = over _3 . Map.unionWith f . Map.fromSet (const $ Set.singleton ri)
 
+
             let modReg = do
-                    (ih, a) <- gv
+                    (a, ih) <- gv
                     setVal a
 
                     -- needed only for efficiency
@@ -169,9 +183,9 @@ newReference a = do
                     modify $ changeRev (flip Set.difference) $ ih' `Set.difference` ih
                     modify $ changeRev Set.union $ ih `Set.difference` ih'
 
-                    modify $ over _2 $ Map.adjust (set dependencies (i,ih)) ri
+                    modify $ over _2 $ Map.adjust (set dependencies (ir, ih)) ri
 
-            modify $ over _2 $ Map.insert ri (UpdateFunState True (i,ih) modReg)
+            modify $ over _2 $ Map.insert ri (UpdateFunState True (ir, ih) modReg)
 
             -- needed only for efficiency
             modify $ changeRev Set.union ih
@@ -188,10 +202,10 @@ newReference a = do
                         modify $ changeRev (flip Set.difference) ih'
 
                     modify $ over _2 $ Map.update ((f msg <*>) . pure) ri
-
         }
 
-joinReg :: (Monad m, Applicative m) => ReadT m (Reference m a) -> Bool -> (a -> HandT m a) -> CreateT m ()
+
+joinReg :: (Monad m, Applicative m) => RefReaderT m (Reference m a) -> Bool -> (a -> HandT m a) -> RefCreatorT m ()
 joinReg m init a = do
     r <- newReference mempty
     register r True $ \kill -> do
@@ -199,11 +213,11 @@ joinReg m init a = do
         ref <- liftRefReader' m
         fmap fst $ getHandler $ register ref init a
     tell $ \msg -> MonadMonoid $ do
-        h <- runRefWriterOfReadT $ liftRefReader $ readRef_ r
+        h <- runRefWriterT $ liftRefReader $ readRef_ r
         runMonadMonoid $ h msg
 
 instance (Monad m, Applicative m) => RefClass (Reference m) where
-    type RefReaderSimple (Reference m) = ReadT m
+    type RefReaderSimple (Reference m) = RefReaderT m
 
     unitRef = pure $ Reference
         { readRef_  = pure ()
@@ -226,18 +240,7 @@ instance (Monad m, Applicative m) => RefClass (Reference m) where
         , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
 
-{-
-    traversalMap k mr = pure $ Reference
-        { readRef_  = fmap (^. k) $ readRefSimple mr
-        , writeRef_ = \b -> do
-            r <- mr
-            a <- readRef_ r
-            writeRef_ r $ set k b a
-        , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
-        }
--}
-
-instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
+instance (Monad m, Applicative m) => MonadRefCreator (RefCreatorT m) where
 
     newRef = fmap pure . newReference
 
@@ -292,21 +295,18 @@ instance (Monad m, Applicative m) => MonadRefCreator (CreateT m) where
                     return (((== a), ((m',h1,h2), b')), it: memo)
 
     onRegionStatusChange h
-        = tell $ MonadMonoid . runRefWriterOfReadT . liftEffectM . h
+        = tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
 
 ----------------------------------- aux
 
-getTrackingIds :: (Monad m, Applicative m) => HandT m a -> ModifyT m (Ids, a)
-getTrackingIds = RefWriterOfReadT . mapStateT (fmap (\((a,st),ids) -> ((ids,a),st)) . runWriterT)
+liftRefReader' :: (Monad m, Applicative m) => RefReaderT m a -> HandT m a
+liftRefReader' = readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runRefReaderT
 
-liftRefReader' :: (Monad m, Applicative m) => ReadT m a -> HandT m a
-liftRefReader' = readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runReadT
-
-dropHandler :: (Monad m, Applicative m) => CreateT m a -> CreateT m a
+dropHandler :: (Monad m, Applicative m) => RefCreatorT m a -> RefCreatorT m a
 dropHandler = lift . fmap fst . runWriterT
 
-getHandler :: (Monad m, Applicative m) => CreateT m a -> HandT m (Handler m, a)
+getHandler :: (Monad m, Applicative m) => RefCreatorT m a -> HandT m (Handler m, a)
 getHandler = mapStateT (lift . fmap (\((a,h),st)->((h,a),st))) . runWriterT
 
 unsafeGet :: Dyn -> a
@@ -317,44 +317,47 @@ runHandler = mapStateT lift . runMonadMonoid
 
 ----------------------------------------- lenses
 
-dependencies :: Lens' (UpdateFunState m) (Id, Ids)
+dependencies :: Lens' (UpdateFunState m) (Id m, Ids m)
 dependencies k (UpdateFunState a b c) = k b <&> \b' -> UpdateFunState a b' c
 
 alive :: Lens' (UpdateFunState m) Bool
 alive k (UpdateFunState a b c) = k a <&> \a' -> UpdateFunState a' b c
 
+updateFun :: Lens' (UpdateFunState m) (RefWriterT m ())
+updateFun k (UpdateFunState a b c) = k c <&> \c' -> UpdateFunState a b c'
+
 -------------------------------------------------------
 
-instance (Monad m, Applicative m) => MonadRefReader (CreateT m) where
-    type BaseRef (CreateT m) = Reference m
-    liftRefReader = lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runReadT
+instance (Monad m, Applicative m) => MonadRefReader (RefCreatorT m) where
+    type BaseRef (RefCreatorT m) = Reference m
+    liftRefReader = lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
 
-instance (Monad m, Applicative m) => MonadRefReader (ReadT m) where
-    type BaseRef (ReadT m) = Reference m
+instance (Monad m, Applicative m) => MonadRefReader (RefReaderT m) where
+    type BaseRef (RefReaderT m) = Reference m
     liftRefReader = id
 
-instance (Monad m, Applicative m) => MonadRefReader (RefWriterOf (ReadT m)) where
-    type BaseRef (RefWriterOf (ReadT m)) = Reference m
-    liftRefReader = RefWriterOfReadT . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runReadT
+instance (Monad m, Applicative m) => MonadRefReader (RefWriterOf (RefReaderT m)) where
+    type BaseRef (RefWriterOf (RefReaderT m)) = Reference m
+    liftRefReader = RefWriterT . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
 
-instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (ReadT m)) where
+instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (RefReaderT m)) where
     liftRefWriter = id
 
-instance (Monad m, Applicative m) => MonadMemo (CreateT m) where
-    memoRead = memoRead_ $ \r -> lift . runRefWriterOfReadT . writeRefSimple r
+instance (Monad m, Applicative m) => MonadMemo (RefCreatorT m) where
+    memoRead = memoRead_ $ \r -> lift . runRefWriterT . writeRefSimple r
 
-instance (Monad m, Applicative m) => MonadRefWriter (CreateT m) where
-    liftRefWriter = lift . runRefWriterOfReadT
+instance (Monad m, Applicative m) => MonadRefWriter (RefCreatorT m) where
+    liftRefWriter = lift . runRefWriterT
 
 instance MonadTrans Register where
     lift = Register . lift . lift . lift
 
-instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (ReadT m)) where
-    type EffectM (RefWriterOf (ReadT m)) = m
-    liftEffectM = RefWriterOfReadT . lift
+instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) where
+    type EffectM (RefWriterOf (RefReaderT m)) = m
+    liftEffectM = RefWriterT . lift
 
-instance (Monad m, Applicative m) => MonadEffect (CreateT m) where
-    type EffectM (CreateT m) = m
+instance (Monad m, Applicative m) => MonadEffect (RefCreatorT m) where
+    type EffectM (RefCreatorT m) = m
     liftEffectM = lift . lift
 
 instance (Monad m, Applicative m) => MonadEffect (Register m) where
@@ -389,12 +392,10 @@ runRegister newChan m = do
     (read, write) <- newChan
     runRegister_ read write m
 
-runRegister_ :: (Monad m, Applicative m) => m (Register m ()) -> (Register m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ :: (Monad m, Applicative m) => m (RefWriterT m ()) -> (RefWriterT m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    (a, s) <- run mempty m
-    pure $ (,) a $ fmap (const ()) $ run s $ forever $ join $ lift read
-  where
-    run s = flip runStateT s . fmap fst . runWriterT . flip runReaderT (write . Register . lift . liftRefWriter) . unRegister
+    (a, s) <- flip runStateT mempty . fmap fst . runWriterT . flip runReaderT (write . liftRefWriter) . unRegister $ m
+    pure $ (,) a $ flip evalStateT s $ forever $ join $ lift $ fmap runRefWriterT read
 
 
 runTests :: IO ()
@@ -402,9 +403,9 @@ runTests :: IO ()
 runTests = tests runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name (TP . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
+runTest name = runTest_ name (TP . RefWriterT . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
-newtype TP = TP { unTP :: Register (Prog TP) () }
+newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif

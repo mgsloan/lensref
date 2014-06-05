@@ -13,7 +13,7 @@ import Data.Traversable
 import Control.Applicative
 import Control.Monad
 import Control.Arrow ((***))
-import Control.Lens
+import Control.Lens.Simple
 
 import Data.LensRef
 import Data.LensRef.Class
@@ -105,7 +105,7 @@ tests runTest = do
 
     runTestSimple "join + ext" $ do
         r2 <- newRef $ Just (5 :: Int)
-        r1 <- newRef Nothing
+        r1 <- newRef (Nothing :: Maybe Int)
         rr <- newRef r1
         let r = join $ readRef rr
         q <- extRef r maybeLens (False, 0)
@@ -135,7 +135,6 @@ tests runTest = do
         q ==> (False, 7)
         writeRef r1 Nothing
         q ==> (False, 7)
-
 
 {-
     runTestSimple "join + lensMap id + ext" $ do

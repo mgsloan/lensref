@@ -14,6 +14,8 @@ module Data.LensRef.Common where
 import Data.Monoid
 import Data.Maybe
 import Data.List
+import qualified Data.Set as Set
+import qualified Data.Map as Map
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
 import Control.Applicative
@@ -47,6 +49,23 @@ instance (Monad m, Monoid a) => Monoid (MonadMonoid m a) where
 newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
 
 type SRef m a = Morph (StateT a m) m
+
+data OrdRef m a = OrdRef
+    { ordRefId :: Int
+    , ordRefRef :: SRef m a
+    }
+
+instance Eq (OrdRef m a) where
+    OrdRef i _ == OrdRef j _ = i == j
+
+instance Ord (OrdRef m a) where
+    OrdRef i _ `compare` OrdRef j _ = i `compare` j
+
+newOrdRef :: NewRef m => a -> m (OrdRef m a)
+newOrdRef a = liftA2 OrdRef newId (newRef' a)
+
+runOrdRef :: NewRef m => OrdRef m a -> StateT a m b -> m b
+runOrdRef (OrdRef _ r) f = runMorph r f
 
 class (Monad m, Applicative m) => NewRef m where
     newRef' :: a -> m (SRef m a)
@@ -126,22 +145,50 @@ topSortComponent
     :: (Int -> [Int])   -- ^ children
     -> Int              -- ^ starting point
     -> Maybe [Int]
-topSortComponent ch a = topSort ch (walk ch a) [a]
- 
--- | topological sorting
-topSort
-    :: (Int -> [Int])       -- ^ children
-    -> IntMap.IntMap [Int]  -- ^ parents
-    -> [Int]                -- ^ sources
-    -> Maybe [Int]
-topSort _ par []
-    | IntMap.null par = Just []
-    | otherwise = Nothing
-topSort ch par (p:ps) = fmap (p:) $ topSort ch par' $ merge ps ys
+topSortComponent ch a = topSort (walk a) [a]
   where
-    xs = ch p
-    par' = foldr (IntMap.adjust $ filter (/= p)) (IntMap.delete p par) xs
-    ys = sort $ filter (null . (par' IntMap.!)) xs    -- TODO: eliminate sort
+    topSort par []
+        | IntMap.null par = Just []
+        | otherwise = Nothing
+    topSort par (p:ps) = fmap (p:) $ topSort par' $ merge ps ys
+      where
+        xs = ch p
+        par' = foldr (IntMap.adjust $ filter (/= p)) (IntMap.delete p par) xs
+        ys = sort $ filter (null . (par' IntMap.!)) xs    -- TODO: eliminate sort
+
+    walk v = execState (collects v) $ IntMap.singleton v []
+
+    collects v = mapM_ (collect v) $ ch v
+    collect p v = do
+        visited <- gets $ IntMap.member v
+        modify $ IntMap.alter (Just . (p:) . fromMaybe []) v
+        when (not visited) $ collects v
+
+topSortComponentM
+    :: (Ord a, Monad m, Applicative m)
+    => (a -> m [a])   -- ^ children
+    -> a              -- ^ starting point
+    -> m (Maybe [a])
+topSortComponentM ch a = walk a >>= topSort [a]
+  where
+    topSort [] par
+        | Map.null par = pure $ Just []
+        | otherwise = pure $ Nothing
+    topSort (p:ps) par = do
+        xs <- ch p
+        let
+            par' = foldr (Map.adjust $ filter (/= p)) (Map.delete p par) xs
+            ys = sort $ filter (null . (par' Map.!)) xs    -- TODO: eliminate sort
+        fmap (fmap (p:)) $ topSort (merge ps ys) par'
+
+    walk v = execStateT (collects v) $ Map.singleton v []
+
+    collects v = mapM_ (collect v) =<< lift (ch v)
+    collect p v = do
+        visited <- gets $ Map.member v
+        modify $ Map.alter (Just . (p:) . fromMaybe []) v
+        when (not visited) $ collects v
+
 
 merge :: Ord a => [a] -> [a] -> [a]
 merge [] xs = xs
@@ -150,15 +197,6 @@ merge (x:xs) (y:ys) = case compare x y of
     LT -> x: merge xs (y:ys)
     GT -> y: merge (x:xs) ys
     EQ -> x: merge xs ys
-
-walk :: (Int -> [Int]) -> Int -> IntMap.IntMap [Int]
-walk ch v = execState (collects v) $ IntMap.singleton v []
-  where
-    collects v = mapM_ (collect v) $ ch v
-    collect p v = do
-      visited <- gets $ IntMap.member v
-      modify $ IntMap.alter (Just . (p:) . fromMaybe []) v
-      when (not visited) $ collects v
 
 allUnique :: [Int] -> Bool
 allUnique = and . flip evalState mempty . mapM f where
@@ -170,24 +208,4 @@ readerToState g (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f $ g s
 nextKey :: IntMap.IntMap a -> Int
 nextKey = maybe 0 ((+1) . fst . fst) . IntMap.maxViewWithKey
 
----------------------
-
-type Queue a = IntMap.IntMap (Bool{-False: blocked-}, a)
-
-emptyQueue :: Queue a
-emptyQueue = IntMap.empty
-
-queueElems :: Queue a -> [a]
-queueElems = map snd . filter fst . IntMap.elems
-
-addElem :: a -> Queue a -> ((Queue a -> a, RegionStatusChange -> Queue a -> ([a], Queue a)), Queue a)
-addElem a as = ((getElem, delElem), IntMap.insert i (True,a) as)
-  where
-    i = maybe 0 ((+1) . fst . fst) $ IntMap.maxViewWithKey as
-
-    getElem is = snd $ is IntMap.! i
-
-    delElem Kill is = ([], IntMap.delete i is)
-    delElem Block is = ([], IntMap.adjust ((set _1) False) i is)
-    delElem Unblock is = (map snd $ maybeToList $ IntMap.lookup i is, IntMap.adjust ((set _1) True) i is)
 
