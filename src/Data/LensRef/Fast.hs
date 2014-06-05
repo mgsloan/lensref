@@ -56,7 +56,7 @@ type TId m = OrdRef m (UpdateFunState m)
 type Ids m = Set.Set (Id m)
 type TIds m = Set.Set (TId m)
 
--- collecting identifiers of references on whose values the return runRefReaderT depends on
+-- collecting identifiers of references on whose values the return value depends on
 type TrackedT m = WriterT (Ids m)
 
 -- Handlers are added on trigger registration.
@@ -68,7 +68,7 @@ type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 type HandlerT n m = WriterT (Handler n) m
 
 data RefReaderT m a
-    = RefReaderT { runRefReaderT_ :: TrackedT m m a }
+    = RefReaderT (TrackedT m m a)
     | RefReaderTPure a
 
 
@@ -94,11 +94,11 @@ type RefCreatorT m = HandlerT m m
 
 
 
-
 data UpdateFunState m = UpdateFunState
     { _alive :: Bool
     , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
     , _updateFun :: RefWriterT m ()    -- what to run if at least one of the dependency changes
+    , _reverseDeps :: TIds m
     }
 
 data Reference m a = Reference
@@ -120,26 +120,20 @@ newtype Register m a = Register { unRegister :: Inner m (RefCreatorT m) a }
 
 instance NewRef m => Functor (RefReaderT m) where
     fmap f (RefReaderTPure x) = RefReaderTPure $ f x
-    fmap f mr = RefReaderT
-        { runRefReaderT_ = fmap f $ runRefReaderT mr
-        }
+    fmap f (RefReaderT mr) = RefReaderT $ fmap f mr
 
 instance NewRef m => Applicative (RefReaderT m) where
     pure a = RefReaderTPure a
     RefReaderTPure f <*> RefReaderTPure a = RefReaderTPure $ f a
-    mf <*> ma = RefReaderT
-        { runRefReaderT_ = runRefReaderT mf <*> runRefReaderT ma
-        }
+    mf <*> ma = RefReaderT $ runRefReaderT mf <*> runRefReaderT ma
 
 instance NewRef m => Monad (RefReaderT m) where
     return a = pure a
     RefReaderTPure r >>= f = f r
-    mr >>= f = RefReaderT
-        { runRefReaderT_ = runRefReaderT mr >>= runRefReaderT . f
-        }
+    RefReaderT mr >>= f = RefReaderT $ mr >>= runRefReaderT . f
 
 runRefReaderT (RefReaderTPure a) = pure a
-runRefReaderT x = runRefReaderT_ x
+runRefReaderT (RefReaderT x) = x
 
 ------------------------------
 
@@ -168,7 +162,7 @@ newReference a = do
 
 
             -- TODO: elim this
-            m1 <- newOrdRef $ UpdateFunState True (ir, mempty) $ RefWriterT $ setVal a
+            m1 <- newOrdRef $ UpdateFunState True (ir, mempty) (RefWriterT $ setVal a) mempty
 
             let gr :: TId m -> m [TId m]
                 gr n = children =<< runOrdRef n (gets _dependencies)
@@ -177,12 +171,15 @@ newReference a = do
                 children (b, db) = do
                     nas <- runOrdRef b $ gets snd
                     fmap concat $ forM (Set.toList nas) $ \na -> do
-                        UpdateFunState alive (a, _) _ <- runOrdRef na get
+                        UpdateFunState alive (a, _) _ _ <- runOrdRef na get
                         pure $ if alive && a `Set.notMember` db
                             then [na]
                             else []
 
-            l <- maybe (fail "cycle") pure =<< topSortComponentM gr m1
+                store :: TId m -> SRef m (TIds m)
+                store n = Morph $ \f -> runOrdRef n $ zoom reverseDeps f
+
+            l <- maybe (fail "cycle") pure =<< topSortComponentM store gr m1
 
             forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ gets $ _updateFun
 
@@ -194,7 +191,7 @@ newReference a = do
             (a, ih) <- lift gv
             when init $ lift $ setVal a
 
-            ri <- lift $ newOrdRef $ UpdateFunState True (ir, ih) undefined
+            ri <- lift $ newOrdRef $ UpdateFunState True (ir, ih) undefined mempty
 
             let addRev, delRev :: Id m -> m ()
                 addRev x = runOrdRef x $ modify $ over _2 $ Set.insert ri
@@ -232,11 +229,12 @@ newReference a = do
 
 
 joinReg :: NewRef m => RefReaderT m (Reference m a) -> Bool -> (a -> HandT m a) -> RefCreatorT m ()
-joinReg m init a = do
+joinReg (RefReaderTPure r) init a = register r init a
+joinReg (RefReaderT m) init a = do
     r <- newReference mempty
     register r True $ \kill -> do
         runHandler $ kill Kill
-        ref <- liftRefReader' m
+        ref <- m
         fmap fst $ getHandler $ register ref init a
     tell $ \msg -> MonadMonoid $ do
         h <- runRefWriterT $ liftRefReader $ readRef_ r
@@ -277,6 +275,7 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
         dropHandler $ register r True $ \a -> liftRefReader' $ fmap (\b -> set k b a) $ readRefSimple m
         return $ pure r
 
+    onChange (RefReaderTPure a) f = fmap RefReaderTPure $ f a
     onChange m f = do
         r <- newReference (mempty, error "impossible #4")
         register r True $ \(h, _) -> do
@@ -284,10 +283,11 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
             getHandler $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
 
-    onChangeEq m f = do
+    onChangeEq (RefReaderTPure a) f = fmap RefReaderTPure $ f a
+    onChangeEq (RefReaderT m) f = do
         r <- newReference (const False, (mempty, error "impossible #3"))
         register r True $ \it@(p, (h', _)) -> do
-            a <- liftRefReader' m
+            a <- m
             if p a
               then return it
               else do
@@ -297,14 +297,15 @@ instance NewRef m => MonadRefCreator (RefCreatorT m) where
 
         return $ fmap (snd . snd) $ readRef_ r
 
-    onChangeMemo mr f = do
+    onChangeMemo (RefReaderTPure a) f = fmap RefReaderTPure $ join $ f a
+    onChangeMemo (RefReaderT mr) f = do
         r <- newReference ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
         register r True upd
         return $ fmap (snd . snd . fst) $ readRef_ r
       where
         upd st@((p, ((m'',h1'',h2''), _)), memo) = do
             let it = (p, (m'', h1''))
-            a <- liftRefReader' mr
+            a <- mr
             if p a
               then return st
               else case listToMaybe [ b | (p, b) <- memo, p a] of
@@ -344,13 +345,16 @@ runHandler = lift . runMonadMonoid
 -------------- lenses
 
 dependencies :: Lens' (UpdateFunState m) (Id m, Ids m)
-dependencies k (UpdateFunState a b c) = k b <&> \b' -> UpdateFunState a b' c
+dependencies k (UpdateFunState a b c d) = k b <&> \b' -> UpdateFunState a b' c d
 
 alive :: Lens' (UpdateFunState m) Bool
-alive k (UpdateFunState a b c) = k a <&> \a' -> UpdateFunState a' b c
+alive k (UpdateFunState a b c d) = k a <&> \a' -> UpdateFunState a' b c d
 
 updateFun :: Lens' (UpdateFunState m) (RefWriterT m ())
-updateFun k (UpdateFunState a b c) = k c <&> \c' -> UpdateFunState a b c'
+updateFun k (UpdateFunState a b c d) = k c <&> \c' -> UpdateFunState a b c' d
+
+reverseDeps :: Lens' (UpdateFunState m) (TIds m)
+reverseDeps k (UpdateFunState a b c d) = k d <&> \d' -> UpdateFunState a b c d'
 
 -------------------------------------------------------
 

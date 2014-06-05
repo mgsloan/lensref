@@ -15,7 +15,6 @@ import Data.Monoid
 import Data.Maybe
 import Data.List
 import qualified Data.Set as Set
-import qualified Data.Map as Map
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
 import Control.Applicative
@@ -23,7 +22,7 @@ import Control.Concurrent
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
-import Control.Lens.Simple
+--import Control.Lens.Simple
 
 import System.IO.Unsafe
 
@@ -165,29 +164,28 @@ topSortComponent ch a = topSort (walk a) [a]
         when (not visited) $ collects v
 
 topSortComponentM
-    :: (Ord a, Monad m, Applicative m)
-    => (a -> m [a])   -- ^ children
+    :: (Monad m, Applicative m, Ord a)
+    => (a -> SRef m (Set.Set a))    -- ^ howto store values in a
+    -> (a -> m [a])   -- ^ children; should be ordered
     -> a              -- ^ starting point
     -> m (Maybe [a])
-topSortComponentM ch a = walk a >>= topSort [a]
+topSortComponentM store ch a = collects a >> topSort [a]
   where
-    topSort [] par
-        | Map.null par = pure $ Just []
-        | otherwise = pure $ Nothing
-    topSort (p:ps) par = do
+    topSort [] = pure $ Just []
+--        | Map.null par = pure $ Just []
+--        | otherwise = pure $ Nothing
+    topSort (p:ps) = do
         xs <- ch p
-        let
-            par' = foldr (Map.adjust $ filter (/= p)) (Map.delete p par) xs
-            ys = sort $ filter (null . (par' Map.!)) xs    -- TODO: eliminate sort
-        fmap (fmap (p:)) $ topSort (merge ps ys) par'
+        runMorph (store p) $ put mempty
+        forM_ xs $ \x -> runMorph (store x) $ modify $ Set.delete p
+        ys <- filterM (flip runMorph (gets Set.null) . store) xs
+        fmap (fmap (p:)) $ topSort $ merge ps ys
 
-    walk v = execStateT (collects v) $ Map.singleton v []
-
-    collects v = mapM_ (collect v) =<< lift (ch v)
+    collects v = mapM_ (collect v) =<< ch v
     collect p v = do
-        visited <- gets $ Map.member v
-        modify $ Map.alter (Just . (p:) . fromMaybe []) v
-        when (not visited) $ collects v
+        notvisited <- runMorph (store v) $ gets Set.null
+        runMorph (store v) $ modify $ Set.insert p
+        when notvisited $ collects v
 
 
 merge :: Ord a => [a] -> [a] -> [a]

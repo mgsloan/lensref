@@ -31,7 +31,7 @@ import Control.Monad.Writer
 import Control.Monad.Identity
 import Control.Lens.Simple
 
-import Debug.Trace
+--import Debug.Trace
 import Unsafe.Coerce
 
 import Data.LensRef.Class
