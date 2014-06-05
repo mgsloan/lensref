@@ -47,7 +47,6 @@ use l = gets (view l)
 
 to :: (s -> a) -> Getting r s a
 to f g s = Const $ getConst $ g $ f s
---to f g s = Const $ f s
 
 infixr 4 %~
 

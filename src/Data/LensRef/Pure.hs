@@ -120,7 +120,7 @@ newtype Register m a = Register { unRegister :: Inner m (RefCreatorT m) a }
 
 newReference :: forall m a . (Monad m, Applicative m) => a -> RefCreatorT m (Reference m a)
 newReference a = do
-    ir <- gets $ nextKey . (^. _1)
+    ir <- use $ _1 . to nextKey
 {- show resource info
     (aa,bb,cc) <- get
     let info m = Map.size m
@@ -129,7 +129,7 @@ newReference a = do
     let
         getVal = asks $ unsafeGet . fromMaybe (error "fatal: cant find ref value") . Map.lookup ir
         setVal :: MonadState (St m) n => a -> n ()
-        setVal a = modify $ over _1 $ Map.insert ir $ Dyn a
+        setVal a = _1 %= Map.insert ir (Dyn a)
 
     setVal a
 
@@ -139,8 +139,8 @@ newReference a = do
             getVal
 
         , writeRef_ = \a -> do
-            st_ <- gets (^. _2)
-            revmap <- gets (^. _3)
+            st_ <- use _2
+            revmap <- use _3
 
             let st = Map.insert (-1) (UpdateFunState True (ir, mempty) $ setVal a) st_
 
@@ -168,10 +168,10 @@ newReference a = do
             (a, ih) <- liftRefWriter gv
             when init $ setVal a
 
-            ri <- gets $ nextKey . (^. _2)
+            ri <- use $ _2 . to nextKey
 
             -- needed only for efficiency
-            let changeRev f = over _3 . Map.unionWith f . Map.fromSet (const $ Set.singleton ri)
+            let changeRev f = Map.unionWith f . Map.fromSet (const $ Set.singleton ri)
 
 
             let modReg = do
@@ -179,16 +179,16 @@ newReference a = do
                     setVal a
 
                     -- needed only for efficiency
-                    ih' <- gets $ (^. _2) . (^. dependencies) . (Map.! ri) . (^. _2)
-                    modify $ changeRev (flip Set.difference) $ ih' `Set.difference` ih
-                    modify $ changeRev Set.union $ ih `Set.difference` ih'
+                    ih' <- use $ _2 . to (Map.! ri) . dependencies . _2
+                    _3 %= changeRev (flip Set.difference) (ih' `Set.difference` ih)
+                    _3 %= changeRev Set.union (ih `Set.difference` ih')
 
-                    modify $ over _2 $ Map.adjust (set dependencies (ir, ih)) ri
+                    _2 %= Map.adjust (set dependencies (ir, ih)) ri
 
-            modify $ over _2 $ Map.insert ri (UpdateFunState True (ir, ih) modReg)
+            _2 %= Map.insert ri (UpdateFunState True (ir, ih) modReg)
 
             -- needed only for efficiency
-            modify $ changeRev Set.union ih
+            _3 %= changeRev Set.union ih
 
             let f Kill    = Nothing
                 f Block   = Just $ set alive False
@@ -198,10 +198,10 @@ newReference a = do
 
                     -- needed only for efficiency
                     when (msg == Kill) $ do
-                        ih' <- gets $ fromMaybe mempty . fmap ((^. _2) . (^. dependencies)) . Map.lookup ri . (^. _2)
-                        modify $ changeRev (flip Set.difference) ih'
+                        ih' <- use $ _2 . to (fromMaybe mempty . fmap (^. dependencies . _2) . Map.lookup ri)
+                        _3 %= changeRev (flip Set.difference) ih'
 
-                    modify $ over _2 $ Map.update ((f msg <*>) . pure) ri
+                    _2 %= Map.update ((f msg <*>) . pure) ri
         }
 
 

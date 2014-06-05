@@ -147,9 +147,9 @@ newReference a = do
 
 
     let getVal :: m a
-        getVal = runOrdRef ir $ gets $ unsafeGet . (^. _1)
+        getVal = runOrdRef ir $ use $ _1 . to unsafeGet
         setVal :: a -> m ()
-        setVal = runOrdRef ir . modify . set _1 . Dyn
+        setVal = runOrdRef ir . (_1 .=) . Dyn
 
 
 
@@ -165,11 +165,11 @@ newReference a = do
             m1 <- newOrdRef $ UpdateFunState True (ir, mempty) (RefWriterT $ setVal a) mempty
 
             let gr :: TId m -> m [TId m]
-                gr n = children =<< runOrdRef n (gets _dependencies)
+                gr n = children =<< runOrdRef n (use dependencies)
 
                 children :: (Id m, Ids m) -> m [TId m]
                 children (b, db) = do
-                    nas <- runOrdRef b $ gets snd
+                    nas <- runOrdRef b $ use _2
                     fmap concat $ forM (Set.toList nas) $ \na -> do
                         UpdateFunState alive (a, _) _ _ <- runOrdRef na get
                         pure $ if alive && a `Set.notMember` db
@@ -181,7 +181,7 @@ newReference a = do
 
             l <- maybe (fail "cycle") pure =<< topSortComponentM store gr m1
 
-            forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ gets $ _updateFun
+            forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ use updateFun
 
         , register = \init upd -> do
 
@@ -194,37 +194,32 @@ newReference a = do
             ri <- lift $ newOrdRef $ UpdateFunState True (ir, ih) undefined mempty
 
             let addRev, delRev :: Id m -> m ()
-                addRev x = runOrdRef x $ modify $ over _2 $ Set.insert ri
-                delRev x = runOrdRef x $ modify $ over _2 $ Set.delete ri
+                addRev x = runOrdRef x $ _2 %= Set.insert ri
+                delRev x = runOrdRef x $ _2 %= Set.delete ri
 
             let modReg = do
                     (a, ih) <- gv
                     setVal a
 
 
-                    ih' <- runOrdRef ri $ gets $ (^. _2) . (^. dependencies)
+                    ih' <- runOrdRef ri $ use $ dependencies . _2
                     mapM_ delRev $ Set.toList $ ih' `Set.difference` ih
                     mapM_ addRev $ Set.toList $ ih `Set.difference` ih'
 
-                    runOrdRef ri $ modify $ set dependencies (ir, ih)
+                    runOrdRef ri $ dependencies .= (ir, ih)
 
-            lift $ runOrdRef ri $ modify $ set updateFun $ RefWriterT modReg
+            lift $ runOrdRef ri $ updateFun .= RefWriterT modReg
 
 
             lift $ mapM_ addRev $ Set.toList ih
 
-            let f Kill    = id
-                f Block   = set alive False
-                f Unblock = set alive True
-
             tell $ \msg -> MonadMonoid $ do
 
-
                     when (msg == Kill) $ do
-                        ih' <- runOrdRef ri $ gets $ (^. _2) . (^. dependencies)
+                        ih' <- runOrdRef ri $ use $ dependencies . _2
                         mapM_ delRev $ Set.toList ih'
 
-                    runOrdRef ri $ modify $ f msg
+                    runOrdRef ri $ alive .= (msg == Unblock)
         }
 
 
