@@ -81,9 +81,8 @@ library
     build-depends:
                     operational < 0.3
                   , QuickCheck >= 2 && < 2.8
-                  , lens < 4.2
     exposed-modules:
-                    Data.LensRef.Arbitrary
+--                    Data.LensRef.Arbitrary
                     Data.LensRef.TestEnv
                     Data.LensRef.Test
 
