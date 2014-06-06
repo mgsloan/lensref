@@ -64,9 +64,6 @@ type TrackedT m = WriterT (Ids m)
 -- invariant property: in the St state the ... is changed only
 type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 
--- collecting handlers
-type HandlerT m = WriterT (Handler m)
-
 data RefReaderT m a
     = RefReaderT (TrackedT m m a)
     | RefReaderTPure a
@@ -80,8 +77,8 @@ newtype instance RefWriterOf (RefReaderT m) a
 
 type RefWriterT m = RefWriterOf (RefReaderT m)
 
-
-type RefCreatorT m = HandlerT m m
+-- collecting handlers
+type RefCreatorT m = WriterT (Handler m) m
 
 
 data UpdateFunState m = UpdateFunState
@@ -146,9 +143,7 @@ newReference a = do
 
         , writeRef_ = \a -> RefWriterT $ do
 
-
-            -- TODO: elim this
-            m1 <- newOrdRef $ UpdateFunState True (ir, mempty) (RefWriterT $ setVal a) mempty
+            setVal a
 
             let gr :: TId m -> m [TId m]
                 gr n = children =<< runOrdRef n (use dependencies)
@@ -164,6 +159,8 @@ newReference a = do
 
                 store :: TId m -> SRef m (TIds m)
                 store n = Morph $ \f -> runOrdRef n $ zoom reverseDeps f
+
+            m1 <- children (ir, mempty)
 
             l <- maybe (fail "cycle") pure =<< topSortComponentM store gr m1
 
@@ -322,9 +319,6 @@ unsafeGet (Dyn a) = unsafeCoerce a
 
 runHandler :: NewRef m => MonadMonoid m () -> HandT m ()
 runHandler = lift . runMonadMonoid
-
-writeRef' :: NewRef m => Ref (Register m) a -> a -> Register m ()
-writeRef' r = liftRefWriter' . writeRefSimple r
 
 liftRefWriter' :: NewRef m => RefWriter (Register m) a -> Register m a
 liftRefWriter' = lift . lift . runRefWriterT

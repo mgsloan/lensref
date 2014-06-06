@@ -64,9 +64,6 @@ type TrackedT m = WriterT (Ids m)
 -- invariant property: in the St state the ... is changed only
 type Handler m = RegionStatusChangeHandler (MonadMonoid (StateT (St m) m))
 
--- collecting handlers
-type HandlerT m = WriterT (Handler m)
-
 newtype RefReaderT (m :: * -> *) a
     = RefReaderT { runRefReaderT :: ReaderT ValSt (TrackedT m Identity) a }
         deriving (Monad, Applicative, Functor, MonadReader ValSt)
@@ -80,8 +77,9 @@ newtype instance RefWriterOf (RefReaderT m) a
 
 type RefWriterT m = RefWriterOf (RefReaderT m)
 
+-- collecting handlers
 -- invariant property: the St state is only exteded, not changed
-type RefCreatorT m = HandlerT m (StateT (St m) m)
+type RefCreatorT m = WriterT (Handler m) (StateT (St m) m)
 
 type St m = (ValSt, TriggerSt m, RevMap m)
 
@@ -310,9 +308,6 @@ unsafeGet (Dyn a) = unsafeCoerce a
 
 runHandler :: (Monad m, Applicative m) => MonadMonoid (StateT (St m) m) () -> HandT m ()
 runHandler = mapStateT lift . runMonadMonoid
-
-writeRef' :: (Monad m, Applicative m) => Ref (Register m) a -> a -> Register m ()
-writeRef' r = liftRefWriter' . writeRefSimple r
 
 liftRefWriter' :: (Monad m, Applicative m) => RefWriter (Register m) a -> Register m a
 liftRefWriter' = lift . lift . runRefWriterT

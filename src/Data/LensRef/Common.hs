@@ -165,9 +165,9 @@ topSortComponentM
     :: (Monad m, Applicative m, Ord a)
     => (a -> SRef m (Set.Set a))    -- ^ howto store values in a
     -> (a -> m [a])   -- ^ children; should be ordered
-    -> a              -- ^ starting point
+    -> [a]            -- ^ starting points
     -> m (Maybe [a])
-topSortComponentM store ch a = collects a >> topSort [a]
+topSortComponentM store ch as = mapM_ collects as >> topSort as
   where
     topSort [] = pure $ Just []
 --        | Map.null par = pure $ Just []
