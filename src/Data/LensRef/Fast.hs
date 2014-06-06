@@ -65,7 +65,7 @@ type TrackedT m = WriterT (Ids m)
 type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 
 -- collecting handlers
-type HandlerT n m = WriterT (Handler n) m
+type HandlerT m = WriterT (Handler m)
 
 data RefReaderT m a
     = RefReaderT (TrackedT m m a)
@@ -84,16 +84,6 @@ type RefWriterT m = RefWriterOf (RefReaderT m)
 type RefCreatorT m = HandlerT m m
 
 
-
-
-
-
-
-
-
-
-
-
 data UpdateFunState m = UpdateFunState
     { _alive :: Bool
     , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
@@ -110,11 +100,7 @@ data Reference m a = Reference
         -> RefCreatorT m ()         -- emits a handler
     }
 
--- postpone function
-type Inner m n = ReaderT (RefWriterT m () -> m ()) n
-
-newtype Register m a = Register { unRegister :: Inner m (RefCreatorT m) a }
-    deriving (Functor, Applicative, Monad, MonadFix)
+type Register m = ReaderT (RefWriterT m () -> m ()) (RefCreatorT m)
 
 -------------------------
 
@@ -341,7 +327,7 @@ writeRef' :: NewRef m => Ref (Register m) a -> a -> Register m ()
 writeRef' r = liftRefWriter' . writeRefSimple r
 
 liftRefWriter' :: NewRef m => RefWriter (Register m) a -> Register m a
-liftRefWriter' = Register . lift . lift . runRefWriterT
+liftRefWriter' = lift . lift . runRefWriterT
 
 -------------- lenses
 
@@ -377,9 +363,6 @@ instance NewRef m => MonadRefWriter (RefWriterOf (RefReaderT m)) where
 instance NewRef m => MonadMemo (RefCreatorT m) where
     memoRead = memoRead_ $ \r -> lift . runRefWriterT . writeRefSimple r
 
-instance MonadTrans Register where
-    lift = Register . lift . lift
-
 instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
     type EffectM (RefWriterOf (RefReaderT m)) = m
     liftEffectM = RefWriterT
@@ -387,28 +370,6 @@ instance NewRef m => MonadEffect (RefWriterOf (RefReaderT m)) where
 instance NewRef m => MonadEffect (RefCreatorT m) where
     type EffectM (RefCreatorT m) = m
     liftEffectM = lift
-
-instance NewRef m => MonadEffect (Register m) where
-    type EffectM (Register m) = m
-    liftEffectM = lift
-
-instance NewRef m => MonadRefReader (Register m) where
-    type BaseRef (Register m) = Reference m
-    liftRefReader = Register . lift . liftRefReader
-
-instance NewRef m => MonadRefCreator (Register m) where
-    extRef r l       = Register . lift . extRef r l
-    newRef           = Register . lift . newRef
-    onChange r f     = Register $ ReaderT $ \st -> onChange r $ fmap (flip runReaderT st . unRegister) f
-    onChangeEq r f   = Register $ ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st . unRegister) f
-    onChangeMemo r f = Register $ ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st . unRegister) . flip runReaderT st . unRegister) f
-    onRegionStatusChange = Register . lift . onRegionStatusChange
-
-instance NewRef m => MonadMemo (Register m) where
-    memoRead = memoRead_ writeRef'
-
-instance NewRef m => MonadRegister (Register m) where
-    askPostpone = Register ask
 
 --------------------------
 
@@ -419,7 +380,7 @@ runRegister newChan m = do
 
 runRegister_ :: NewRef m => (m (RefWriterT m ())) -> (RefWriterT m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    a <- fmap fst $ runWriterT $ flip runReaderT (write . liftRefWriter) $ unRegister m
+    a <- fmap fst $ runWriterT $ flip runReaderT (write . liftRefWriter) m
     pure $ (,) a $ forever $ join $ fmap runRefWriterT read
 
 

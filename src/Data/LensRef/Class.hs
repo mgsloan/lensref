@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# OPTIONS_HADDOCK prune #-}
 {-# OPTIONS_HADDOCK not-home #-}
 -- | Core lensref interface
@@ -31,6 +32,7 @@ module Data.LensRef.Class
 
     -- * Other
     , MonadMemo (..)
+    , Morph (..)
     ) where
 
 
@@ -264,7 +266,7 @@ data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 type RegionStatusChangeHandler m = RegionStatusChange -> m ()
 
 --------------------------------------------------- instances
-{-
+
 instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
     type BaseRef (ReaderT w m) = BaseRef m
     liftRefReader = lift . liftRefReader
@@ -275,6 +277,7 @@ instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
     onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
     onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
     onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
+    onRegionStatusChange = lift . onRegionStatusChange
 
 instance (MonadMemo m) => MonadMemo (ReaderT w m) where
     memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
@@ -282,15 +285,11 @@ instance (MonadMemo m) => MonadMemo (ReaderT w m) where
 instance (MonadEffect m) => MonadEffect (ReaderT w m) where
     type EffectM (ReaderT w m) = EffectM m
     liftEffectM = lift . liftEffectM
--}
-{-
-instance (MonadRegister m, Monoid w) => MonadRegister (ReaderT w m) where
-    type UpdateM (ReaderT w m) = UpdateM m
-    onUpdate r b f = lift $ onUpdate r b f
-    askPostpone = lift askPostpone
-    onRegionStatusChange g = lift $ onRegionStatusChange g
--}
 
+newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
+
+instance (MonadRefCreator m, n ~ RefWriter m, k ~ EffectM m) => MonadRegister (ReaderT (n () -> k ()) m) where
+    askPostpone = ask
 
 
 

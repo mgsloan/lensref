@@ -45,8 +45,6 @@ instance (Monad m, Monoid a) => Monoid (MonadMonoid m a) where
 
 ------------------------
 
-newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
-
 type SRef m a = Morph (StateT a m) m
 
 data OrdRef m a = OrdRef
