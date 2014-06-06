@@ -1,9 +1,34 @@
 
 = lensref-0.3 =
 
+* Updated semantics which make possible onChange without an Eq constraint
+  This semantics handles more tricky situations than the previous one.
+
+Interface changes:
+
 * Data.LensRef provides a restricted (and probably less confusing) interface
-* Rename onChange combinators
-* Documentation: Introduction to state-based FRP (under construction)
+  The hidden functions can be accessed via Data.LensRef.Class
+* Renamed onChange combinators
+* onChange don't have the Eq constraint; there is an new onChangeEq function
+  with the interface of the previous onChange function
+* Most of the methods of the MonadRegister type class
+  went to the MonadRefCreator type class
+* Simplification: provide askPostpone instead of registerCallback
+* Correction references (still experimental)
+
+Implementation changes:
+
+* Completed fast implementation, and for the new semantics
+* The pure implementation is also quite fast now
+  (but asymptotically slower than the fast implementation)
+* More test cases
+* Use Applicative instead of Monad in ReadRef where possible
+
+Documentation:
+
+* Begin to write an introduction to state-based FRP (still under construction)
+* graphviz support for documentation
+
 
 = lensref-0.2 =
 
