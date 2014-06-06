@@ -20,17 +20,12 @@ module Data.LensRef.Fast
     , runTests
     ) where
 
--- import Data.Monoid
 import Data.Maybe
-import qualified Data.Set as Set
---import qualified Data.Map as Map
 import Control.Applicative hiding (empty)
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
---import Control.Monad.Identity
 import Control.Lens.Simple
-
 
 import Unsafe.Coerce
 
@@ -48,13 +43,11 @@ data Dyn where Dyn :: a -> Dyn
 
 -- Each atomic reference has a unique identifier
 type Id m = OrdRef m (Dyn, TIds m)   -- (value, reverse deps)
+type Ids m = OrdRefSet m (Dyn, TIds m)
 
 -- trigger id
 type TId m = OrdRef m (UpdateFunState m)
-
--- set of identifiers
-type Ids m = Set.Set (Id m)
-type TIds m = Set.Set (TId m)
+type TIds m = OrdRefSet m (UpdateFunState m)
 
 -- collecting identifiers of references on whose values the return value depends on
 type TrackedT m = WriterT (Ids m)
@@ -124,21 +117,14 @@ newReference :: forall m a . NewRef m => a -> RefCreatorT m (Reference m a)
 newReference a = do
     ir <- lift $ newOrdRef (Dyn a, mempty)
 
-
-
-
-
-
     let getVal :: m a
         getVal = runOrdRef ir $ use $ _1 . to unsafeGet
         setVal :: a -> m ()
         setVal = runOrdRef ir . (_1 .=) . Dyn
 
-
-
     pure Reference
         { readRef_ = RefReaderT $ do
-            tell $ Set.singleton ir
+            tell $ insertOrdRef ir mempty
             lift getVal
 
         , writeRef_ = \a -> RefWriterT $ do
@@ -151,9 +137,9 @@ newReference a = do
                 children :: (Id m, Ids m) -> m [TId m]
                 children (b, db) = do
                     nas <- runOrdRef b $ use _2
-                    fmap concat $ forM (Set.toList nas) $ \na -> do
+                    fmap concat $ forM (ordRefToList nas) $ \na -> do
                         UpdateFunState alive (a, _) _ _ <- runOrdRef na get
-                        pure $ if alive && a `Set.notMember` db
+                        pure $ if alive && not (ordRefMember a db)
                             then [na]
                             else []
 
@@ -177,8 +163,8 @@ newReference a = do
             ri <- lift $ newOrdRef $ UpdateFunState True (ir, ih) undefined mempty
 
             let addRev, delRev :: Id m -> m ()
-                addRev x = runOrdRef x $ _2 %= Set.insert ri
-                delRev x = runOrdRef x $ _2 %= Set.delete ri
+                addRev x = runOrdRef x $ _2 %= insertOrdRef ri
+                delRev x = runOrdRef x $ _2 %= deleteOrdRef ri
 
             let modReg = do
                     (a, ih) <- gv
@@ -186,21 +172,21 @@ newReference a = do
 
 
                     ih' <- runOrdRef ri $ use $ dependencies . _2
-                    mapM_ delRev $ Set.toList $ ih' `Set.difference` ih
-                    mapM_ addRev $ Set.toList $ ih `Set.difference` ih'
+                    mapM_ delRev $ ordRefToList $ ih' `ordRefDifference` ih
+                    mapM_ addRev $ ordRefToList $ ih `ordRefDifference` ih'
 
                     runOrdRef ri $ dependencies .= (ir, ih)
 
             lift $ runOrdRef ri $ updateFun .= RefWriterT modReg
 
 
-            lift $ mapM_ addRev $ Set.toList ih
+            lift $ mapM_ addRev $ ordRefToList ih
 
             tell $ \msg -> MonadMonoid $ do
 
                     when (msg == Kill) $ do
                         ih' <- runOrdRef ri $ use $ dependencies . _2
-                        mapM_ delRev $ Set.toList ih'
+                        mapM_ delRev $ ordRefToList ih'
 
                     runOrdRef ri $ alive .= (msg == Unblock)
         }

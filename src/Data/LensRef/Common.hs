@@ -14,7 +14,6 @@ module Data.LensRef.Common where
 import Data.Monoid
 import Data.Maybe
 import Data.List
-import qualified Data.Set as Set
 import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
 import Control.Applicative
@@ -63,6 +62,20 @@ newOrdRef a = liftA2 OrdRef newId (newRef' a)
 
 runOrdRef :: NewRef m => OrdRef m a -> StateT a m b -> m b
 runOrdRef (OrdRef _ r) f = runMorph r f
+
+type OrdRefSet m a = IntMap.IntMap (SRef m a)
+
+insertOrdRef, deleteOrdRef :: OrdRef m a -> OrdRefSet m a -> OrdRefSet m a
+insertOrdRef (OrdRef i r) = IntMap.insert i r
+deleteOrdRef (OrdRef i _) = IntMap.delete i
+
+ordRefToList :: OrdRefSet m a -> [OrdRef m a]
+ordRefToList = map (uncurry OrdRef) . IntMap.toList
+
+ordRefMember :: OrdRef m a -> OrdRefSet m a -> Bool
+ordRefMember (OrdRef i _) = IntMap.member i
+
+ordRefDifference = IntMap.difference
 
 class (Monad m, Applicative m) => NewRef m where
     newRef' :: a -> m (SRef m a)
@@ -162,8 +175,8 @@ topSortComponent ch a = topSort (walk a) [a]
         when (not visited) $ collects v
 
 topSortComponentM
-    :: (Monad m, Applicative m, Ord a)
-    => (a -> SRef m (Set.Set a))    -- ^ howto store values in a
+    :: (Monad m, Applicative m, a ~ OrdRef m b)
+    => (a -> SRef m (IntMap.IntMap (SRef m b)))    -- ^ howto store values in a
     -> (a -> m [a])   -- ^ children; should be ordered
     -> [a]            -- ^ starting points
     -> m (Maybe [a])
@@ -175,16 +188,15 @@ topSortComponentM store ch as = mapM_ collects as >> topSort as
     topSort (p:ps) = do
         xs <- ch p
         runMorph (store p) $ put mempty
-        forM_ xs $ \x -> runMorph (store x) $ modify $ Set.delete p
-        ys <- filterM (flip runMorph (gets Set.null) . store) xs
+        forM_ xs $ \x -> runMorph (store x) $ modify $ deleteOrdRef p
+        ys <- filterM (flip runMorph (gets IntMap.null) . store) xs
         fmap (fmap (p:)) $ topSort $ merge ps ys
 
     collects v = mapM_ (collect v) =<< ch v
     collect p v = do
-        notvisited <- runMorph (store v) $ gets Set.null
-        runMorph (store v) $ modify $ Set.insert p
+        notvisited <- runMorph (store v) $ gets IntMap.null
+        runMorph (store v) $ modify $ insertOrdRef p
         when notvisited $ collects v
-
 
 merge :: Ord a => [a] -> [a] -> [a]
 merge [] xs = xs
