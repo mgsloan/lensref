@@ -12,7 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 
------------
+----------- type synonyms
 
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 type Lens' s a = Lens s s a a
@@ -29,18 +29,20 @@ type Setting p s t a b = p a (Identity b) -> s -> Identity t
 
 type ASetter s t a b = (a -> Identity b) -> s -> Identity t 
 
-------------
-
-lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
-lens sa sbt afb s = sbt s <$> afb (sa s)
+------------ setter
 
 set :: ASetter s t a b -> b -> s -> t
 set l b = runIdentity . l (\_ -> Identity b)
---set :: Lens s t a b -> b -> s -> t
---set l s = runIdentity . l (const $ Identity s)
 
 over :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
 over l f = runIdentity . l (Identity . f)
+
+infixr 4 %~
+
+(%~) :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
+(%~) = over
+
+------------- getter
 
 use :: MonadState s m => Getting a s a -> m a
 use l = gets (view l)
@@ -48,18 +50,19 @@ use l = gets (view l)
 to :: (s -> a) -> Getting r s a
 to f g s = Const $ getConst $ g $ f s
 
-infixr 4 %~
-
-(%~) :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
-(%~) = over
-
-united :: Lens' a ()
-united f v = fmap (\() -> v) $ f ()
-
 infixl 8 ^.
 
 (^.) :: s -> Getting a s a -> a 
 a ^. l = getConst $ l Const a
+
+------------- lens
+
+lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
+lens sa sbt afb s = sbt s <$> afb (sa s)
+
+united :: Lens' a ()
+united f v = fmap (\() -> v) $ f ()
+
 
 ------------------------- State
 
@@ -71,6 +74,11 @@ l %= f = modify (l %~ f)
 (.=) :: MonadState s m => ASetter s s a b -> b -> m ()
 l .= a = modify $ set l a
 
+zoom :: Monad m => Lens' s t -> StateT t m a -> StateT s m a
+--zoom :: Monad m => Lens' s t -> ReaderT t m a -> ReaderT s m a
+zoom l (StateT m) = StateT $ \s -> liftM (over _2 $ \t -> set l t s) $ m $ s ^. l
+--zoom l (ReaderT m) = ReaderT (zoom l . m)
+
 --------------------------- Reader
 
 infixr 2 `zoom`, `magnify`
@@ -80,14 +88,8 @@ magnify l (ReaderT f) = ReaderT $ \a -> f $ a ^. l
 
 --instance Zoom m n s t => Zoom (ReaderT e m) (ReaderT e n) s t where
 
-zoom :: Monad m => Lens' s t -> StateT t m a -> StateT s m a
---zoom :: Monad m => Lens' s t -> ReaderT t m a -> ReaderT s m a
-zoom l (StateT m) = StateT $ \s -> liftM (over _2 $ \t -> set l t s) $ m $ s ^. l
---zoom l (ReaderT m) = ReaderT (zoom l . m)
-
 view :: MonadReader s m => Getting a s a -> m a 
 view l = asks (^. l)
-
 
 ----------------------
 

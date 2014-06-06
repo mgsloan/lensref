@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
@@ -22,11 +23,16 @@ import Data.LensRef.TestEnv
 -----------------------------------------------------------------
 
 -- | Look inside the sources for the tests.
-tests :: (MonadRegister m, MonadRefWriter m, EffectM m ~ Prog k, {- MonadRegister (RefWriter m), -} Monad n)
-    => (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
+tests :: forall m k n
+     . (MonadRegister m, EffectM m ~ Prog k, Monad n)
+    => (forall b . RefWriter m b -> m b)
+    -> (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()
 
-tests runTest = do
+tests liftRefWriter' runTest = do
+
+    let writeRef' :: Ref m c -> c -> m ()
+        writeRef' r = liftRefWriter' . writeRefSimple r
 
     let runTestSimple name t = runTest name t $ pure ((), pure ())
 
@@ -41,10 +47,10 @@ tests runTest = do
         r2 <- newRef (13 :: Int)
         r1 ==> 3
         r2 ==> 13
-        writeRef r1 4
+        writeRef' r1 4
         r1 ==> 4
         r2 ==> 13
-        writeRef r2 0
+        writeRef' r2 0
         r1 ==> 4
         r2 ==> 0
 {-
@@ -52,7 +58,7 @@ tests runTest = do
         r <- newRef ["a","b","c"]
         let q = traversalMap traverse r
         q ==> "abc"
-        writeRef q "x"
+        writeRef' q "x"
         q ==> "xxx"
         r ==> ["x","x","x"]
 -}
@@ -63,14 +69,14 @@ tests runTest = do
             q2 = _2 `lensMap` q
         r ==> Just 3
         q ==> (True, 3)
-        writeRef r Nothing
+        writeRef' r Nothing
         r ==> Nothing
         q ==> (False, 3)
         q1 ==> False
-        writeRef q1 True
+        writeRef' q1 True
         q1 ==> True
         r ==> Just 3
-        writeRef q2 1
+        writeRef' q2 1
         r ==> Just 1
 
     runTestSimple "joinTest" $ do
@@ -80,25 +86,25 @@ tests runTest = do
         r1 ==> 3
         let r = join $ readRef rr
         r ==> 3
-        writeRef r1 4
+        writeRef' r1 4
         r ==> 4
-        writeRef r 8
+        writeRef' r 8
         r1 ==> 8
         r2 ==> 5
-        writeRef rr r2
+        writeRef' rr r2
         r ==> 5
-        writeRef r1 4
+        writeRef' r1 4
         r ==> 5
-        writeRef r2 14
+        writeRef' r2 14
         r ==> 14
-        writeRef r 10
+        writeRef' r 10
         r1 ==> 4
         r2 ==> 10
-        writeRef rr r1
+        writeRef' rr r1
         r ==> 4
         r1 ==> 4
         r2 ==> 10
-        writeRef r 11
+        writeRef' r 11
         r ==> 11
         r1 ==> 11
         r2 ==> 10
@@ -112,28 +118,28 @@ tests runTest = do
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
         q ==> (False, 0)
-        writeRef r1 $ Just 4
+        writeRef' r1 $ Just 4
         q ==> (True, 4)
-        writeRef q1 False
+        writeRef' q1 False
         r1 ==> Nothing
-        writeRef rr r2
+        writeRef' rr r2
         q ==> (True, 5)
-        writeRef r1 $ Just 6
+        writeRef' r1 $ Just 6
         q ==> (True, 5)
         r2 ==> Just 5
-        writeRef r2 $ Just 7
+        writeRef' r2 $ Just 7
         q ==> (True, 7)
         r1 ==> Just 6
-        writeRef q1 False
+        writeRef' q1 False
         r2 ==> Nothing
         r1 ==> Just 6
-        writeRef q1 True
+        writeRef' q1 True
         r2 ==> Just 7
         r1 ==> Just 6
-        writeRef r2 Nothing
+        writeRef' r2 Nothing
         r1 ==> Just 6
         q ==> (False, 7)
-        writeRef r1 Nothing
+        writeRef' r1 Nothing
         q ==> (False, 7)
 
 {-
@@ -146,22 +152,22 @@ tests runTest = do
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
         q ==> (False, 0)
-        writeRef r1 $ Just 4
+        writeRef' r1 $ Just 4
         q ==> (True, 4)
-        writeRef q1 False
+        writeRef' q1 False
         r1 ==> Nothing
-        writeRef rr r2
+        writeRef' rr r2
         q ==> (True, 5)
-        writeRef r1 $ Just 6
+        writeRef' r1 $ Just 6
         q ==> (True, 5)
         r2 ==> Just 5
-        writeRef q1 False
+        writeRef' q1 False
         r2 ==> Nothing
         r1 ==> Just 6
-        writeRef q1 True
+        writeRef' q1 True
         r2 ==> Just 5
         r1 ==> Just 6
-        writeRef r2 Nothing
+        writeRef' r2 Nothing
         r1 ==> Just 6
         q ==> (True, 5)
 -}
@@ -176,22 +182,22 @@ tests runTest = do
         let q1 = _1 `lensMap` q
             q2 = _2 `lensMap` q
         q ==> (False, 0)
-        writeRef r1 $ Just 4
+        writeRef' r1 $ Just 4
         q ==> (True, 4)
-        writeRef q1 False
+        writeRef' q1 False
         r1 ==> Nothing
-        writeRef rr False
+        writeRef' rr False
         q ==> (True, 5)
-        writeRef r1 $ Just 6
+        writeRef' r1 $ Just 6
         q ==> (True, 5)
         r2 ==> Just 5
-        writeRef q1 False
+        writeRef' q1 False
         r2 ==> Nothing
         r1 ==> Just 6
-        writeRef q1 True
+        writeRef' q1 True
         r2 ==> Just 5
         r1 ==> Just 6
-        writeRef r2 Nothing
+        writeRef' r2 Nothing
         r1 ==> Just 6
         q ==> (False, 5)
 
@@ -199,7 +205,7 @@ tests runTest = do
         r1 <- newRef (3 :: Int)
         rr <- newRef r1
         r2 <- newRef 5
-        writeRef rr r2
+        writeRef' rr r2
         join (readRef rr) ==> 5
 
     runTestSimple "chainTest0" $ do
@@ -209,15 +215,15 @@ tests runTest = do
         r ==> 1
         q ==> 1
         s ==> 1
-        writeRef r 2
+        writeRef' r 2
         r ==> 2
         q ==> 2
         s ==> 2
-        writeRef q 3
+        writeRef' q 3
         r ==> 3
         q ==> 3
         s ==> 3
-        writeRef s 4
+        writeRef' s 4
         r ==> 4
         q ==> 4
         s ==> 4
@@ -229,15 +235,15 @@ tests runTest = do
         r ==> 1
         q ==> 1
         s ==> 1
-        writeRef r 2
+        writeRef' r 2
         r ==> 2
         q ==> 2
         s ==> 2
-        writeRef q 3
+        writeRef' q 3
         r ==> 3
         q ==> 3
         s ==> 3
-        writeRef s 4
+        writeRef' s 4
         r ==> 4
         q ==> 4
         s ==> 4
@@ -249,39 +255,39 @@ tests runTest = do
         r ==> Just 1
         q ==> (True, 1)
         s ==> (True, 1)
-        writeRef r $ Just 2
+        writeRef' r $ Just 2
         r ==> Just 2
         q ==> (True, 2)
         s ==> (True, 2)
-        writeRef r Nothing
+        writeRef' r Nothing
         r ==> Nothing
         q ==> (False, 2)
         s ==> (False, 2)
-        writeRef (_1 `lensMap` q) True
+        writeRef' (_1 `lensMap` q) True
         r ==> Just 2
         q ==> (True, 2)
         s ==> (True, 2)
-        writeRef (_2 `lensMap` q) 3
+        writeRef' (_2 `lensMap` q) 3
         r ==> Just 3
         q ==> (True, 3)
         s ==> (True, 3)
-        writeRef (_1 `lensMap` q) False
+        writeRef' (_1 `lensMap` q) False
         r ==> Nothing
         q ==> (False, 3)
         s ==> (False, 3)
-        writeRef (_2 `lensMap` q) 4
+        writeRef' (_2 `lensMap` q) 4
         r ==> Nothing
         q ==> (False, 4)
         s ==> (False, 3)
-        writeRef (_1 `lensMap` q) True
+        writeRef' (_1 `lensMap` q) True
         r ==> Just 4
         q ==> (True, 4)
         s ==> (True, 4)
-        writeRef q (False, 5)
+        writeRef' q (False, 5)
         r ==> Nothing
         q ==> (False, 5)
         s ==> (False, 4)
-        writeRef (_1 `lensMap` s) True
+        writeRef' (_1 `lensMap` s) True
         r ==> Just 4
         q ==> (True, 4)
         s ==> (True, 4)
@@ -290,11 +296,11 @@ tests runTest = do
         r <- newRef $ Just Nothing
         q <- extRef r maybeLens (False, Nothing)
         s <- extRef (_2 `lensMap` q) maybeLens (False, 3 :: Int)
-        writeRef (_1 `lensMap` s) False
+        writeRef' (_1 `lensMap` s) False
         r ==> Just Nothing
         q ==> (True, Nothing)
         s ==> (False, 3)
-        writeRef (_1 `lensMap` q) False
+        writeRef' (_1 `lensMap` q) False
         r ==> Nothing
         q ==> (False, Nothing)
         s ==> (False, 3)
@@ -306,19 +312,19 @@ tests runTest = do
         r ==> Just (Just 3)
         q ==> (True, Just 3)
         s ==> (True, 3)
-        writeRef (_1 `lensMap` s) False
+        writeRef' (_1 `lensMap` s) False
         r ==> Just Nothing
         q ==> (True, Nothing)
         s ==> (False, 3)
-        writeRef (_1 `lensMap` q) False
+        writeRef' (_1 `lensMap` q) False
         r ==> Nothing
         q ==> (False, Nothing)
         s ==> (False, 3)
-        writeRef (_1 `lensMap` s) True
+        writeRef' (_1 `lensMap` s) True
         r ==> Nothing
         q ==> (False, Just 3)
         s ==> (True, 3)
-        writeRef (_1 `lensMap` q) True
+        writeRef' (_1 `lensMap` q) True
         r ==> Just (Just 3)
         q ==> (True, Just 3)
         s ==> (True, 3)
@@ -326,7 +332,7 @@ tests runTest = do
     runTestSimple "undoTest" $ do
         r <- newRef (3 :: Int)
         q <- extRef r (lens head $ flip (:)) []
-        writeRef r 4
+        writeRef' r 4
         q ==> [4, 3]
 
     runTestSimple "undoTest2" $ do
@@ -335,7 +341,7 @@ tests runTest = do
         q ==> [3]
 
     let
-        perform m = m >>= maybe (pure ()) liftRefWriter
+        perform m = m >>= maybe (pure ()) liftRefWriter'
         m === t = m >>= \x -> isJust x ==? t
 
     runTestSimple "undoTest3" $ do
@@ -344,11 +350,11 @@ tests runTest = do
         r ==> 3
         redo === False
         undo === False
-        writeRef r 4
+        writeRef' r 4
         r ==> 4
         redo === False
         undo === True
-        writeRef r 5
+        writeRef' r 5
         r ==> 5
         redo === False
         undo === True
@@ -364,7 +370,7 @@ tests runTest = do
         r ==> 4
         redo === True
         undo === True
-        writeRef r 6
+        writeRef' r 6
         r ==> 6
         redo === False
         undo === True
@@ -375,11 +381,11 @@ tests runTest = do
         q_ <- extRef r (lens fst (\(_, y) x -> (x, ""))) ("","")
         let q = lensMap _2 q_
         t2 <- newRef "z"
-        writeRef q "."
+        writeRef' q "."
         q ==> "."
-        writeRef t2 "q"
+        writeRef' t2 "q"
         q ==> "."
-        writeRef t1 "q"
+        writeRef' t1 "q"
         q ==> "."
 
 {- TODO
@@ -388,7 +394,7 @@ tests runTest = do
         rr <- newRef r
         let r' = join $ readRef rr
         r' ==> "x"
-        writeRef rr r'
+        writeRef' rr r'
         r' ==> "x"
 -}
 
@@ -657,25 +663,25 @@ tests runTest = do
             q2 = _2 `lensMap` q
         r ==> Just 3
         q ==> (True, 3)
-        writeRef r Nothing
+        writeRef' r Nothing
         r ==> Nothing
         q ==> (False, 3)
         q1 ==> False
-        writeRef q1 True
+        writeRef' q1 True
         r ==> Just 3
-        writeRef q2 1
+        writeRef' q2 1
         r ==> Just 1
         t2 <- newRef $ Just (3 :: Int)
-        writeRef t t2
+        writeRef' t t2
         r ==> Just 3
         q ==> (True, 3)
-        writeRef r Nothing
+        writeRef' r Nothing
         r ==> Nothing
         q ==> (False, 3)
         q1 ==> False
-        writeRef q1 True
+        writeRef' q1 True
         r ==> Just 3
-        writeRef q2 1
+        writeRef' q2 1
         r ==> Just 1
 
 

@@ -337,6 +337,12 @@ unsafeGet (Dyn a) = unsafeCoerce a
 runHandler :: NewRef m => MonadMonoid m () -> HandT m ()
 runHandler = lift . runMonadMonoid
 
+writeRef' :: NewRef m => Ref (Register m) a -> a -> Register m ()
+writeRef' r = liftRefWriter' . writeRefSimple r
+
+liftRefWriter' :: NewRef m => RefWriter (Register m) a -> Register m a
+liftRefWriter' = Register . lift . lift . runRefWriterT
+
 -------------- lenses
 
 dependencies :: Lens' (UpdateFunState m) (Id m, Ids m)
@@ -371,9 +377,6 @@ instance NewRef m => MonadRefWriter (RefWriterOf (RefReaderT m)) where
 instance NewRef m => MonadMemo (RefCreatorT m) where
     memoRead = memoRead_ $ \r -> lift . runRefWriterT . writeRefSimple r
 
-instance NewRef m => MonadRefWriter (RefCreatorT m) where
-    liftRefWriter = lift . runRefWriterT
-
 instance MonadTrans Register where
     lift = Register . lift . lift
 
@@ -402,10 +405,7 @@ instance NewRef m => MonadRefCreator (Register m) where
     onRegionStatusChange = Register . lift . onRegionStatusChange
 
 instance NewRef m => MonadMemo (Register m) where
-    memoRead = memoRead_ writeRef --fmap (Register . lift) . Register . lift . memoRead . unRegister
-
-instance NewRef m => MonadRefWriter (Register m) where
-    liftRefWriter = Register . lift . liftRefWriter
+    memoRead = memoRead_ writeRef'
 
 instance NewRef m => MonadRegister (Register m) where
     askPostpone = Register ask
@@ -425,7 +425,7 @@ runRegister_ read write m = do
 
 runTests :: IO ()
 #ifdef __TESTS__
-runTests = tests runTest
+runTests = tests liftRefWriter' runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
 runTest name = runTest_ name (TP . RefWriterT) $ \r w -> runRegister_ (fmap unTP r) (w . TP)

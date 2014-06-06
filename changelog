@@ -23,6 +23,7 @@ Implementation changes:
   (but asymptotically slower than the fast implementation)
 * More test cases
 * Use Applicative instead of Monad in ReadRef where possible
+* Eliminate lens dependency, use a compatible custom module instead
 
 Documentation:
 

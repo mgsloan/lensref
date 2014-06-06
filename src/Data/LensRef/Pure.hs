@@ -162,10 +162,10 @@ newReference a = do
 
         , register = \init upd -> do
 
-            let gv = RefWriterT . mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT)
+            let gv = mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT)
                         $ liftRefReader' (RefReaderT getVal) >>= upd
 
-            (a, ih) <- liftRefWriter gv
+            (a, ih) <- lift gv
             when init $ setVal a
 
             ri <- use $ _2 . to nextKey
@@ -175,7 +175,7 @@ newReference a = do
 
 
             let modReg = do
-                    (a, ih) <- gv
+                    (a, ih) <- RefWriterT gv
                     setVal a
 
                     -- needed only for efficiency
@@ -315,6 +315,12 @@ unsafeGet (Dyn a) = unsafeCoerce a
 runHandler :: (Monad m, Applicative m) => MonadMonoid (StateT (St m) m) () -> HandT m ()
 runHandler = mapStateT lift . runMonadMonoid
 
+writeRef' :: (Monad m, Applicative m) => Ref (Register m) a -> a -> Register m ()
+writeRef' r = liftRefWriter' . writeRefSimple r
+
+liftRefWriter' :: (Monad m, Applicative m) => RefWriter (Register m) a -> Register m a
+liftRefWriter' = Register . lift . lift . runRefWriterT
+
 ----------------------------------------- lenses
 
 dependencies :: Lens' (UpdateFunState m) (Id m, Ids m)
@@ -346,9 +352,6 @@ instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (RefReaderT m))
 instance (Monad m, Applicative m) => MonadMemo (RefCreatorT m) where
     memoRead = memoRead_ $ \r -> lift . runRefWriterT . writeRefSimple r
 
-instance (Monad m, Applicative m) => MonadRefWriter (RefCreatorT m) where
-    liftRefWriter = lift . runRefWriterT
-
 instance MonadTrans Register where
     lift = Register . lift . lift . lift
 
@@ -377,10 +380,7 @@ instance (Monad m, Applicative m) => MonadRefCreator (Register m) where
     onRegionStatusChange = Register . lift . onRegionStatusChange
 
 instance (Monad m, Applicative m) => MonadMemo (Register m) where
-    memoRead = memoRead_ writeRef --fmap (Register . lift) . Register . lift . memoRead . unRegister
-
-instance (Monad m, Applicative m) => MonadRefWriter (Register m) where
-    liftRefWriter = Register . lift . liftRefWriter
+    memoRead = memoRead_ writeRef'
 
 instance (Monad m, Applicative m) => MonadRegister (Register m) where
     askPostpone = Register ask
@@ -400,7 +400,7 @@ runRegister_ read write m = do
 
 runTests :: IO ()
 #ifdef __TESTS__
-runTests = tests runTest
+runTests = tests liftRefWriter' runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
 runTest name = runTest_ name (TP . RefWriterT . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
