@@ -18,6 +18,7 @@ module Data.LensRef.Fast
     ( Register
     , runRegister
     , runTests
+    , runPerformanceTests
     ) where
 
 import Data.Maybe
@@ -81,14 +82,17 @@ data UpdateFunState m = UpdateFunState
     , _reverseDeps :: TIds m
     }
 
+--type MLens m a b = a -> m (b, b -> m a)
+
 data Reference m a = Reference
-    { readRef_  :: RefReaderT m a        
-    , writeRef_ :: a -> RefWriterT m ()
+    { readWrite :: RefReaderT m (a, a -> RefWriterT m ())
     , register
         :: Bool                 -- True: run the following function initially
         -> (a -> HandT m a)     -- trigger to be registered
         -> RefCreatorT m ()         -- emits a handler
     }
+
+readRef_ r = fmap fst $ readWrite r
 
 type Register m = ReaderT (RefWriterT m () -> m ()) (RefCreatorT m)
 
@@ -123,34 +127,35 @@ newReference a = do
         setVal = runOrdRef ir . (_1 .=) . Dyn
 
     pure Reference
-        { readRef_ = RefReaderT $ do
+        { readWrite = RefReaderT $ do
+
             tell $ insertOrdRef ir mempty
-            lift getVal
+            a <- lift getVal
 
-        , writeRef_ = \a -> RefWriterT $ do
+            return $ (,) a $ \a -> RefWriterT $ do
 
-            setVal a
+                setVal a
 
-            let gr :: TId m -> m [TId m]
-                gr n = children =<< runOrdRef n (use dependencies)
+                let gr :: TId m -> m [TId m]
+                    gr n = children =<< runOrdRef n (use dependencies)
 
-                children :: (Id m, Ids m) -> m [TId m]
-                children (b, db) = do
-                    nas <- runOrdRef b $ use _2
-                    fmap concat $ forM (ordRefToList nas) $ \na -> do
-                        UpdateFunState alive (a, _) _ _ <- runOrdRef na get
-                        pure $ if alive && not (ordRefMember a db)
-                            then [na]
-                            else []
+                    children :: (Id m, Ids m) -> m [TId m]
+                    children (b, db) = do
+                        nas <- runOrdRef b $ use _2
+                        fmap concat $ forM (ordRefToList nas) $ \na -> do
+                            UpdateFunState alive (a, _) _ _ <- runOrdRef na get
+                            pure $ if alive && not (ordRefMember a db)
+                                then [na]
+                                else []
 
-                store :: TId m -> SRef m (TIds m)
-                store n = Morph $ \f -> runOrdRef n $ zoom reverseDeps f
+                    store :: TId m -> SRef m (TIds m)
+                    store n = Morph $ \f -> runOrdRef n $ zoom reverseDeps f
 
-            m1 <- children (ir, mempty)
+                m1 <- children (ir, mempty)
 
-            l <- maybe (fail "cycle") pure =<< topSortComponentM store gr m1
+                l <- maybe (fail "cycle") pure =<< topSortComponentM store gr m1
 
-            forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ use updateFun
+                forM_ l $ \n -> join $ fmap runRefWriterT $ runOrdRef n $ use updateFun
 
         , register = \init upd -> do
 
@@ -208,23 +213,17 @@ instance NewRef m => RefClass (Reference m) where
     type RefReaderSimple (Reference m) = RefReaderT m
 
     unitRef = pure $ Reference
-        { readRef_  = pure ()
-        , writeRef_ = const $ pure ()
+        { readWrite = pure ((), const $ pure ())
         , register  = const $ const $ pure ()
         }
 
     readRefSimple = join . fmap readRef_
 
-    writeRefSimple mr a = do
-        r <- liftRefReader mr
-        writeRef_ r a
+    writeRefSimple mr a
+        = liftRefReader (join $ fmap readWrite mr) >>= ($ a) . snd
 
     lensMap k mr = pure $ Reference
-        { readRef_  = fmap (^. k) $ readRefSimple mr
-        , writeRef_ = \b -> do
-            r <- liftRefReader mr
-            a <- liftRefReader $ readRef_ r
-            writeRef_ r $ set k b a
+        { readWrite = join (fmap readWrite mr) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
         , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
 
@@ -372,6 +371,18 @@ runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' (
 runTest name = runTest_ name (TP . RefWriterT) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
 newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
+
+runPerformanceTests :: Int -> IO ()
+runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
+
+assertEq a b | a == b = return ()
+assertEq a b = fail $ show a ++ " /= " ++ show b
+
+runPTest :: String -> Register IO () -> IO ()
+runPTest name m = do
+    putStrLn name
+    _ <- runRegister_ undefined (const $ return ()) m
+    return ()
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif

@@ -7,6 +7,7 @@
 module Data.LensRef.Test
     ( -- * Tests for the interface
       tests
+    , performanceTests
     ) where
 
 import Data.Maybe
@@ -739,6 +740,35 @@ tests liftRefWriter' runTest = do
             send 1 "f"
 --            message' "f"
 -}        
+
+performanceTests :: forall m n
+     . (MonadRegister m, Monad n)
+    => (forall b . RefWriter m b -> m b)
+    -> (forall x . (Eq x, Show x) => x -> x -> m ())          -- asserted eq
+    -> (String -> m () -> n ())
+    -> Int
+    -> n ()
+
+performanceTests liftRefWriter' (==?) runTest n = do
+
+    let writeRef' :: Ref m c -> c -> m ()
+        writeRef' r = liftRefWriter' . writeRefSimple r
+
+    let r ==> v = readRef r >>= (==? v)
+{-
+    runTest "separate refs" $ do
+        rs <- replicateM n $ newRef 'x'
+        forM_ rs $ \r -> r ==> 'x'
+        forM_ rs $ \r -> writeRef' r 'y'
+        forM_ rs $ \r -> r ==> 'y'
+-}
+    runTest "lensMap chain" $ do
+        r <- newRef 'x'
+        let q = iterate (lensMap id) r !! n
+        q ==> 'x'
+        writeRef' q 'y'
+        q ==> 'y'
+
 
 -------------------------- auxiliary definitions
 

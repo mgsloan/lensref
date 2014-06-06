@@ -12,10 +12,11 @@ At the end we arrive to a fascinating FRP system which I call
 
 # Applying a lens to a reference
 
+## Lenses
+
 First I would like to clarify that we use Edward Kmett's lens notations.
-However, we need just a tiny fraction of the `lens` library and we will not
-utilize the amazing generality of the `lens` combinators.
-The needed definitions in a form which is general enough to our current purposes:
+However, we need just a tiny fraction of the `lens` library.
+The needed definitions in a simplified form are the following:
 
 > type Lens' a b = (a -> b, a -> b -> a)
 
@@ -54,27 +55,27 @@ Application of a lens to an `IORef` is only possible with a modified `IORef` def
 
 > newIORef' :: a -> IO (IORef' a)
 > newIORef' a = do
->       r <- newIORef a
->       return (readIORef r, writeIORef r)
+>     r <- newIORef a
+>     return (readIORef r, writeIORef r)
 
 Lens application is now also possible:
 
 > lensMap :: Lens' a b -> IORef' a -> IORef' b
 > lensMap (get, set) (read, write) =
->       ( fmap get read
->       , \b -> do
->               a <- read
->               write $ set a b
->       )
+>     ( fmap get read
+>     , \b -> do
+>          a <- read
+>          write $ set a b
+>     )
 
 ## Usage example
 
 A simple example how to use `lensMap`:
 
 > main = do
->       r <- newIORef' ((1,"a"),True)
->       let r' = lensMap (_1 . _2) r
->       writeIORef' r' "b"
+>     r <- newIORef' ((1,"a"),True)
+>     let r' = lensMap (_1 . _2) r
+>     writeIORef' r' "b"
 
 The values of `r` and `r'` are connected: whenever `r` is written `r'` changes
 and whenever `r'` is written `r` changes.
@@ -102,14 +103,14 @@ By joining a reference I mean the following operation:
 
 ## What is `joinRef` good for?
 
-Suppose we have `r1, r2 :: IORef' Int` and `m :: IO Bool`.
+Suppose we have `mb :: IO Bool` and `r1, r2 :: IORef' Int`.
 With `joinRef` we can make a reference `r` which acts like `r1`
-or `r2` depending on the *actual* return value of `m`.
+or `r2` depending on the *actual* value of `mb`.
 
 > r :: IORef' Int
 > r = joinRef $ do
->       b <- m
->       return $ if b then r1 else r2
+>     b <- mb
+>     return $ if b then r1 else r2
 
 `joinRef` allows more than just switching between two references
 dynamically. One can build a network of references with `lensMap` and
@@ -117,26 +118,29 @@ make this network fully dynamic with `joinRef`.
 
 ## Why is it called `joinRef`?
 
-I call it `joinRef` because with another representation of `IORef'`, `joinRef`
-is just `join`!
+I call it `joinRef` because with another definition of `IORef'`, `Control.Monad.join` acts like `joinRef`!
 
 > type IORef'' a = IO (a, a -> IO ())
 
+`IORef''` is isomorphic to `IORef'`:
+
 > convTo :: IORef' a -> IORef'' a
 > convTo (read, write) = do
->       a <- read
->       return (a, write)
+>     a <- read
+>     return (a, write)
 
 > convFrom :: IORef'' a -> IORef' a
 > convFrom r =
->       ( fmap fst r
->       , \a -> do
->               (_, write) <- r
->               write a
->       )
+>     ( fmap fst r
+>     , \a -> do
+>         (_, write) <- r
+>         write a
+>     )
 
-> joinRef' :: IO (IORef'' a) -> IORef'' a
-> joinRef' = join
+`joinRef` is `join`:
+
+> joinRef :: IO (IORef'' a) -> IORef'' a
+> joinRef = join
 
 
 
@@ -157,7 +161,7 @@ a `Bool` value. We can do it with the following definition:
 > r = ...
 
 > do
->       (r' :: IORef' (Int, Bool)) <- extRef r _1 (0, False)
+>     (r' :: IORef' (Int, Bool)) <- extRef r _1 (0, False)
 
 The third parameter of `extRef` determines the initial value of `r'`. If
 the value of `r` is `15` at the creation time of `r'` then the initial
@@ -201,10 +205,10 @@ It turns out that `extRef` cannot be defined with the previous definitions of `I
 It can be defined on this modified `IORef'` data structure instead:
 
 > data IORef''' a = IORef''
->       { readRef          :: IO a
->       , writeRef         :: a -> IO ()
->       , registerCallback :: IO () -> IO ()
->       }
+>     { readRef          :: IO a
+>     , writeRef         :: a -> IO ()
+>     , registerCallback :: IO () -> IO ()
+>     }
 
 `registerCallback` takes and `IO` action and stores it (there is one store per reference).
 `writeRef` calls all the stored actions after setting the reference value.
