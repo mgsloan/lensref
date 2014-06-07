@@ -16,8 +16,8 @@ The lensref package provides and interface an two implementation for lens refere
 
 * The interface is getting stable. You can expect more functionality and minor changes on current functionality.
 * There are test cases for the first half of the interface. Both implementations fulfil the test cases.
-* The pure implementation is ready.
-* The fast implementation is much faster than the pure implementation, but it is far from being as fast as possible. Probably it also leaks memory.
+* The fast implementation is currently ~10 times slower than IORefs (when used in place of IORefs).
+* The main missing piece is the tutorial which is being written
 
 ## Usage
 
