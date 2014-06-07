@@ -18,7 +18,9 @@ Interface changes:
 
 Implementation changes:
 
-* Completed fast implementation, and for the new semantics
+* Completed fast implementation
+* Fast implementation was tuned for performance
+  It is now just ~10 times slower than IORefs.
 * The pure implementation is also quite fast now
   (but asymptotically slower than the fast implementation)
 * More test cases
@@ -29,7 +31,7 @@ Documentation:
 
 * Begin to write an introduction to state-based FRP (still under construction)
 * graphviz support for documentation
-
+* Added a criterion performance test
 
 = lensref-0.2 =
 
