@@ -22,6 +22,7 @@ module Data.LensRef.Pure
 
 -- import Data.Monoid
 import Data.Maybe
+import Data.List
 import qualified Data.IntSet as Set
 import qualified Data.IntMap as Map
 import Control.Applicative
@@ -29,6 +30,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Identity
+import Control.Monad.Trans.Control
 import Control.Lens.Simple
 
 --import Debug.Trace
@@ -351,6 +353,28 @@ instance (Monad m, Applicative m) => MonadEffect (RefCreatorT m) where
     type EffectM (RefCreatorT m) = m
     liftEffectM = lift . lift
 
+instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
+    type BaseRef (ReaderT w m) = BaseRef m
+    liftRefReader = lift . liftRefReader
+
+instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
+    extRef r l       = lift . extRef r l
+    newRef           = lift . newRef
+    onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
+    onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
+    onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
+    onRegionStatusChange = lift . onRegionStatusChange
+
+instance (MonadMemo m) => MonadMemo (ReaderT w m) where
+    memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
+
+instance (MonadEffect m) => MonadEffect (ReaderT w m) where
+    type EffectM (ReaderT w m) = EffectM m
+    liftEffectM = lift . liftEffectM
+
+instance (MonadRefCreator m, n ~ RefWriter m, k ~ EffectM m) => MonadRegister (ReaderT (n () -> k ()) m) where
+    askPostpone = ask
+
 --------------------------
 
 runRegister :: (Monad m, Applicative m) => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
@@ -375,4 +399,40 @@ newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 #endif
+
+--------------------------
+
+-- | topological sorting on component
+topSortComponent
+    :: (Int -> [Int])   -- ^ children
+    -> Int              -- ^ starting point
+    -> Maybe [Int]
+topSortComponent ch a = topSort (walk a) [a]
+  where
+    topSort par []
+        | Map.null par = Just []
+        | otherwise = Nothing
+    topSort par (p:ps) = fmap (p:) $ topSort par' $ merge ps ys
+      where
+        xs = ch p
+        par' = foldr (Map.adjust $ filter (/= p)) (Map.delete p par) xs
+        ys = sort $ filter (null . (par' Map.!)) xs    -- TODO: eliminate sort
+
+    walk v = execState (collects v) $ Map.singleton v []
+
+    collects v = mapM_ (collect v) $ ch v
+    collect p v = do
+        visited <- gets $ Map.member v
+        modify $ Map.alter (Just . (p:) . fromMaybe []) v
+        when (not visited) $ collects v
+
+allUnique :: [Int] -> Bool
+allUnique = and . flip evalState mempty . mapM f where
+    f x = state $ \s -> (Set.notMember x s, Set.insert x s)
+
+readerToState :: (Monad m, Applicative m) => (s -> r) -> ReaderT r m a -> StateT s m a
+readerToState g (ReaderT f) = StateT $ \s -> fmap (flip (,) s) $ f $ g s
+
+nextKey :: Map.IntMap a -> Int
+nextKey = maybe 0 ((+1) . fst . fst) . Map.maxViewWithKey
 

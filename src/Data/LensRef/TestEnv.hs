@@ -42,15 +42,19 @@ data Inst t a where
 
     ReadI :: Inst t t
     WriteI :: t -> Inst t ()
-    NewRef :: a -> Inst t (Morph (StateT a (Prog t)) (Prog t))
+    NewRef :: a -> Inst t (SRef (Prog t) a)
     NewId :: Inst t Int
 
 type Prog t = ProgramT (Inst t) (State (Int, Seq.Seq Any))
 
 ---------------------------------------------------
 
+newtype SRefProg t a = SRefProg { runSRefProg :: forall x . StateT a (Prog t) x -> Prog t x }
+
 instance NewRef (Prog t) where
+    type SRef (Prog t) = SRefProg t 
     newRef' = singleton . NewRef
+    modRef' = runSRefProg
     newId = singleton NewId
 
 instance MonadEffect (Prog t) where
@@ -234,7 +238,7 @@ coeval__ lift_ op p = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        coeval_ lift_ (k $ Morph $ ff a) p
+        coeval_ lift_ (k $ SRefProg $ ff a) p
 
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s
@@ -320,7 +324,7 @@ eval__ lift_ op = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        eval_ lift_ (k $ Morph $ ff a)
+        eval_ lift_ (k $ SRefProg $ ff a)
 {-
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s

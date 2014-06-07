@@ -11,7 +11,8 @@ module Data.LensRef.Test
     ) where
 
 import Data.Maybe
-import Data.Traversable
+--import Data.Traversable
+import Data.IORef
 import Control.Applicative
 import Control.Monad
 import Control.Arrow ((***))
@@ -755,13 +756,14 @@ performanceTests liftRefWriter' (==?) runTest n = do
         writeRef' r = liftRefWriter' . writeRefSimple r
 
     let r ==> v = readRef r >>= (==? v)
-{-
-    runTest "separate refs" $ do
-        rs <- replicateM n $ newRef 'x'
-        forM_ rs $ \r -> r ==> 'x'
-        forM_ rs $ \r -> writeRef' r 'y'
+
+    runTest "separate refs" $ do    -- 1.68
+        rs <- replicateM n $ newRef 'x'         -- 0.57
+        forM_ rs $ \r -> r ==> 'x'              -- 0.25
+        forM_ rs $ \r -> writeRef' r 'y'        -- 0.61
         forM_ rs $ \r -> r ==> 'y'
--}
+        return ()
+{-
     runTest "lensMap chain" $ do
         r <- newRef 'x'
         let q = iterate (lensMap id) r !! n
@@ -769,6 +771,32 @@ performanceTests liftRefWriter' (==?) runTest n = do
         writeRef' q 'y'
         q ==> 'y'
 
+    runTest "join chain" $ do
+        rb <- newRef True
+        r1 <- newRef 'x'
+        r2 <- newRef 'y'
+        let f (r1, r2) = (r1', r2') where
+                r1' = join $ readRef rb <&> \b -> if b then r1 else r2
+                r2' = join $ readRef rb <&> \b -> if b then r2 else r1
+            (r1', r2') = iterate f (r1, r2) !! (2*n)
+        r1' ==> 'x'
+        r2' ==> 'y'
+        writeRef' r1' 'X'
+        r1' ==> 'X'
+        r2' ==> 'y'
+        writeRef' r2' 'Y'
+        r1' ==> 'X'
+        r2' ==> 'Y'
+        writeRef' rb False
+        r1' ==> 'X'
+        r2' ==> 'Y'
+        writeRef' r1' 'x'
+        r1' ==> 'x'
+        r2' ==> 'Y'
+        writeRef' r2' 'y'
+        r1' ==> 'x'
+        r2' ==> 'y'
+-}
 
 -------------------------- auxiliary definitions
 

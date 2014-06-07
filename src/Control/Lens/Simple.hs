@@ -31,27 +31,29 @@ type ASetter s t a b = (a -> Identity b) -> s -> Identity t
 
 ------------ setter
 
+{-# INLINE set #-}
 set :: ASetter s t a b -> b -> s -> t
 set l b = runIdentity . l (\_ -> Identity b)
 
+{-# INLINE over #-}
 over :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
 over l f = runIdentity . l (Identity . f)
 
 infixr 4 %~
 
+{-# INLINE (%~) #-}
 (%~) :: (p ~ (->)) => Setting p s t a b -> p a b -> s -> t
 (%~) = over
 
 ------------- getter
 
-use :: MonadState s m => Getting a s a -> m a
-use l = gets (view l)
-
+{-# INLINE to #-}
 to :: (s -> a) -> Getting r s a
 to f g s = Const $ getConst $ g $ f s
 
 infixl 8 ^.
 
+{-# INLINE (^.) #-}
 (^.) :: s -> Getting a s a -> a 
 a ^. l = getConst $ l Const a
 
@@ -66,11 +68,17 @@ united f v = fmap (\() -> v) $ f ()
 
 ------------------------- State
 
+{-# INLINE use #-}
+use :: MonadState s m => Getting a s a -> m a
+use l = gets (view l)
+
 infix 4 %=
 
+{-# INLINE (%=) #-}
 (%=) :: (p ~ (->), MonadState s m) => Setting p s s a b -> p a b -> m ()
 l %= f = modify (l %~ f)
 
+{-# INLINE (.=) #-}
 (.=) :: MonadState s m => ASetter s s a b -> b -> m ()
 l .= a = modify $ set l a
 
@@ -83,11 +91,13 @@ zoom l (StateT m) = StateT $ \s -> liftM (over _2 $ \t -> set l t s) $ m $ s ^. 
 
 infixr 2 `zoom`, `magnify`
 
+{-# INLINE magnify #-}
 magnify :: Monad m => Lens' a b -> ReaderT b m c -> ReaderT a m c
 magnify l (ReaderT f) = ReaderT $ \a -> f $ a ^. l
 
 --instance Zoom m n s t => Zoom (ReaderT e m) (ReaderT e n) s t where
 
+{-# INLINE view #-}
 view :: MonadReader s m => Getting a s a -> m a 
 view l = asks (^. l)
 
@@ -95,6 +105,7 @@ view l = asks (^. l)
 
 infixl 1 <&>
 
+{-# INLINE (<&>) #-}
 (<&>) :: Functor f => f a -> (a -> b) -> f b
 as <&> f = f <$> as
 

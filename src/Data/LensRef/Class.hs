@@ -32,14 +32,12 @@ module Data.LensRef.Class
 
     -- * Other
     , MonadMemo (..)
-    , Morph (..)
     ) where
 
 
 import Control.Applicative
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Control.Monad.Trans.Control
+--import Control.Monad.Reader
+--import Control.Monad.Writer
 import Control.Lens.Simple --(Lens', united)
 
 --------------------------------
@@ -119,6 +117,7 @@ class ( Applicative m, Monad m
 
     {- | @readRef@ === @liftRefReader . readRefSimple@
     -}
+    {-# INLINE readRef #-}
     readRef :: (RefClass r, RefReader m ~ RefReaderSimple r) => RefSimple r a -> m a
     readRef = liftRefReader . readRefSimple
 
@@ -143,10 +142,12 @@ class ( MonadRefReader m
 
     {- | @writeRef r@ === @liftRefWriter . writeRefSimple r@
     -}
+    {-# INLINE writeRef #-}
     writeRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> a -> m ()
     writeRef r = liftRefWriter . writeRefSimple r
 
     -- | @modRef r f@ === @readRef r >>= writeRef r . f@
+    {-# INLINE modRef #-}
     modRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> (a -> a) -> m ()
     r `modRef` f = readRef r >>= writeRef r . f
 
@@ -265,31 +266,6 @@ data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)
 -- | TODO
 type RegionStatusChangeHandler m = RegionStatusChange -> m ()
 
---------------------------------------------------- instances
-
-instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
-    type BaseRef (ReaderT w m) = BaseRef m
-    liftRefReader = lift . liftRefReader
-
-instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
-    extRef r l       = lift . extRef r l
-    newRef           = lift . newRef
-    onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
-    onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
-    onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
-    onRegionStatusChange = lift . onRegionStatusChange
-
-instance (MonadMemo m) => MonadMemo (ReaderT w m) where
-    memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
-
-instance (MonadEffect m) => MonadEffect (ReaderT w m) where
-    type EffectM (ReaderT w m) = EffectM m
-    liftEffectM = lift . liftEffectM
-
-newtype Morph m n = Morph { runMorph :: forall a . m a -> n a }
-
-instance (MonadRefCreator m, n ~ RefWriter m, k ~ EffectM m) => MonadRegister (ReaderT (n () -> k ()) m) where
-    askPostpone = ask
 
 
 
