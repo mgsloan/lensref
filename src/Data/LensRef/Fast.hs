@@ -59,9 +59,9 @@ data TriggerState m = TriggerState
 
 -- | reference handler
 data RefHandler m a = RefHandler
-    { readWrite
-        :: !(RefReaderT m (a, a -> m ()))  -- ^ reader and writer actions
-    , register
+    { readWrite           -- ^ reader and writer actions
+        :: !(RefReaderT m (a, a -> m ()))
+    , registerTrigger     -- ^ how to registerTrigger a trigger
         :: Bool           -- ^ True: run the trigger initially also
         -> (a -> m a)     -- ^ trigger to be registered
         -> Register m ()
@@ -159,7 +159,7 @@ newReference a = Register $ \st -> do
                     mapM_ collects as
                     topSort as
 
-        , register = \init upd -> Register $ \st -> do
+        , registerTrigger = \init upd -> Register $ \st -> do
 
             let gv = do
                     modRef' st $ dependencycoll %= mempty
@@ -208,14 +208,14 @@ newReference a = Register $ \st -> do
 
 {-# SPECIALIZE joinReg :: RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> Register IO () #-}
 joinReg :: NewRef m => RefReaderT m (RefHandler m a) -> Bool -> (a -> m a) -> Register m ()
-joinReg (RefReaderTPure r) init a = register r init a
+joinReg (RefReaderTPure r) init a = registerTrigger r init a
 joinReg (RefReaderT m) init a = do
     st <- ask
     r <- newReference mempty
-    register r True $ \kill -> flip unRegister st $ do
+    registerTrigger r True $ \kill -> flip unRegister st $ do
         runM kill Kill
         ref <- m True
-        fmap fst $ getHandler $ register ref init a
+        fmap fst $ getHandler $ registerTrigger ref init a
     tellHand $ \msg -> MonadMonoid $ flip unRegister st $ do
         h <- runRefReaderT_ True $ readRef_ r
         runM h msg
@@ -226,7 +226,7 @@ instance NewRef m => RefClass (RefHandler m) where
 
     unitRef = pure $ RefHandler
         { readWrite = pure ((), const $ pure ())
-        , register  = const $ const $ pure ()
+        , registerTrigger  = const $ const $ pure ()
         }
 
     {-# INLINE readRefSimple #-}
@@ -241,7 +241,7 @@ instance NewRef m => RefClass (RefHandler m) where
 
     lensMap k mr = pure $ RefHandler
         { readWrite = (mr >>= readWrite) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
-        , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
+        , registerTrigger = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
 
 instance NewRef m => MonadRefCreator (Register m) where
@@ -255,14 +255,14 @@ instance NewRef m => MonadRefCreator (Register m) where
         -- TODO: remove dropHandler?
         dropHandler $ do
             joinReg m False $ \_ -> flip unRegister st $ runRefReaderT_ True $ fmap (^. k) $ readRef_ r
-            register r True $ \a -> flip unRegister st $ runRefReaderT_ True $ fmap (\b -> set k b a) $ readRefSimple m
+            registerTrigger r True $ \a -> flip unRegister st $ runRefReaderT_ True $ fmap (\b -> set k b a) $ readRefSimple m
         return $ pure r
 
     onChange (RefReaderTPure a) f = fmap RefReaderTPure $ f a
     onChange m f = do
         st <- ask
         r <- newReference (mempty, error "impossible #4")
-        register r True $ \(h, _) -> flip unRegister st $ do
+        registerTrigger r True $ \(h, _) -> flip unRegister st $ do
             runM h Kill
             getHandler $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
@@ -271,7 +271,7 @@ instance NewRef m => MonadRefCreator (Register m) where
     onChangeEq (RefReaderT m) f = do
         st <- ask
         r <- newReference (const False, (mempty, error "impossible #3"))
-        register r True $ \it@(p, (h', _)) -> flip unRegister st $ do
+        registerTrigger r True $ \it@(p, (h', _)) -> flip unRegister st $ do
             a <- m True
             if p a
               then return it
@@ -286,7 +286,7 @@ instance NewRef m => MonadRefCreator (Register m) where
     onChangeMemo (RefReaderT mr) f = do
         st' <- ask
         r <- newReference ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
-        register r True $ \st@((p, ((m'',h1'',h2''), _)), memo) -> flip unRegister st' $ do
+        registerTrigger r True $ \st@((p, ((m'',h1'',h2''), _)), memo) -> flip unRegister st' $ do
             let it = (p, (m'', h1''))
             a <- mr True
             if p a
