@@ -21,13 +21,12 @@ module Data.LensRef.Fast
     , runPerformanceTests
     ) where
 
-import Debug.Trace
+--import Debug.Trace
 import Data.Maybe
 import Data.Monoid
 import Data.IORef
 import qualified Data.IntMap as Map
-import Control.Applicative hiding (empty)
---import Control.Monad.Reader
+import Control.Applicative
 import Control.Monad.State
 import Control.Lens.Simple
 
@@ -40,156 +39,103 @@ import Data.LensRef.TestEnv hiding (listen, Id)
 import Data.LensRef.Test
 #endif
 
-----------------------
+----------------------------------- data types
 
-newtype Register m a = Register { unRegister :: SRef m (Sta m) -> m a }
+-- | reference temporal state
+data RefState m where
+    RefState 
+        :: a        -- ^ reference value
+        -> TIds m   -- ^ reverse dependencycoll (temporarily needed during topological sorting)
+        -> RefState m
 
-instance Monad m => Monoid (Register m ()) where
---    {-# SPECIALIZE instance Monoid (Register IO ()) #-}
-    {-# INLINE mempty #-}
-    mempty = return ()
-    {-# INLINE mappend #-}
-    m `mappend` n = m >> n
+-- | trigger temporal state
+data TriggerState m = TriggerState
+    { _alive        :: Bool
+    , _targetid     :: (Id m)     -- ^ target reference id
+    , _dependencies :: (Ids m)    -- ^ source reference ids
+    , _updateFun    :: (m ())     -- ^ what to run if at least one of the source ids changes
+    , _reverseDeps  :: (TIds m)   -- ^ reverse dependencies
+    }
 
-{-# INLINE ask #-}
-ask :: Monad m => Register m (SRef m (Sta m))
-ask = Register return
+-- | reference handler
+data RefHandler m a = RefHandler
+    { readWrite
+        :: !(RefReaderT m (a, a -> m ()))  -- ^ reader and writer actions
+    , register
+        :: Bool           -- ^ True: run the trigger initially also
+        -> (a -> m a)     -- ^ trigger to be registered
+        -> Register m ()
+    }
 
-instance Monad m => Monad (Register m) where
---    {-# SPECIALIZE instance Monad (Register IO) #-}
-    {-# INLINE return #-}
-    return = Register . const . return
-    {-# INLINE (>>=) #-}
-    Register m >>= f = Register $ \r -> m r >>= \a -> unRegister (f a) r
+-- | global variables
+data GlobalVars m = GlobalVars
+    { _handlercollection  :: Handler m   -- ^ collected handlers
+    , _dependencycoll     :: Ids m       -- ^ collected dependencies
+    , _postpone :: (m () -> m ())        -- ^ postpone action (never changes)
+    , _counter :: !Int                   -- ^ increasing counter
+    }
 
-instance Applicative m => Applicative (Register m) where
---    {-# SPECIALIZE instance Applicative (Register IO) #-}
-    {-# INLINE pure #-}
-    pure = Register . const . pure
-    {-# INLINE (<*>) #-}
-    Register f <*> Register g = Register $ \r -> f r <*> g r
+-- | reference identifier
+type Id  m = OrdRef m (RefState m)
+-- | reference identifiers
+type Ids m = OrdRefSet m (RefState m)
 
-instance Functor m => Functor (Register m) where
---    {-# SPECIALIZE instance Functor (Register IO) #-}
-    {-# INLINE fmap #-}
-    fmap f (Register m) = Register $ fmap f . m
+-- | trigger identifier
+type TId  m = OrdRef m (TriggerState m)
+-- | trigger identifiers
+type TIds m = OrdRefSet m (TriggerState m)
 
-instance MonadFix m => MonadFix (Register m) where
---    {-# SPECIALIZE instance MonadFix (Register IO) #-}
-    mfix f = Register $ \r -> mfix $ \a -> unRegister (f a) r
+-- | IORef with Ord instance
+data OrdRef    m a = OrdRef !Int !(SRef m a)
+-- | IORefs with Ord instance
+type OrdRefSet m a = Map.IntMap (SRef m a)
 
--- dynamic value + reverse deps
-data Dyn m where Dyn :: a -> TIds m -> Dyn m
 
--- Each atomic reference has a unique identifier
-type Id m = OrdRef m (Dyn m)   -- (value, reverse deps)
-type Ids m = OrdRefSet m (Dyn m)
+------------- data types for computations
 
--- trigger id
-type TId m = OrdRef m (UpdateFunState m)
-type TIds m = OrdRefSet m (UpdateFunState m)
-
--- collecting identifiers of references on whose values the return value depends on
---type TrackedT m = WriterT (Ids m)
-
--- Handlers are added on trigger registration.
--- The registered triggers may be killed, blocked and unblocked via the handler.
--- invariant property: in the St state the ... is changed only
-type Handler m = RegionStatusChangeHandler (MonadMonoid m)
-
+-- reference reader monad
 data RefReaderT m a
     = RefReaderT (Bool -> Register m a)
     | RefReaderTPure a
 
+-- reference creator monad
+newtype Register m a
+    = Register { unRegister :: SRef m (GlobalVars m) -> m a }
 
+-- reference writer monad
 newtype instance RefWriterOf (RefReaderT m) a
     = RefWriterT { runRefWriterT :: Register m a }
         deriving (Monad, Applicative, Functor, MonadFix)
 
-data Sta m = Sta
-    { _handler  :: Handler m
-    , _deps     :: Ids m
-    , _postpone :: (m () -> m ())
-    , _counters :: !Int
-    }
-
-data UpdateFunState m = UpdateFunState
-    { _alive        :: Bool
-    , _wid          :: (Id m)       -- i
-    , _dependencies :: (Ids m)       --  dependencies of i
-    , _updateFun    :: (m ())         -- what to run if at least one of the dependency changes
-    , _reverseDeps  :: (TIds m)
-    }
-
-data Reference m a = Reference
-    { readWrite :: !(RefReaderT m (a, a -> m ()))
-    , register
-        :: Bool                 -- True: run the following function initially
-        -> (a -> m a)     -- trigger to be registered
-        -> Register m ()         -- emits a handler
-    }
-
-{-# INLINE readRef_ #-}
-readRef_ :: NewRef m => Reference m a -> RefReaderT m a
-readRef_ r = readWrite r <&> fst
-
--------------------------
-
-instance Functor m => Functor (RefReaderT m) where
---    {-# SPECIALIZE instance Functor (RefReaderT IO) #-}
-    {-# INLINE fmap #-}
-    fmap f (RefReaderTPure x) = RefReaderTPure $ f x
-    fmap f (RefReaderT mr) = RefReaderT $ \b -> fmap f $ mr b
-
-instance Applicative m => Applicative (RefReaderT m) where
---    {-# SPECIALIZE instance Applicative (RefReaderT IO) #-}
-    {-# INLINE pure #-}
-    pure = RefReaderTPure
-    {-# INLINE (<*>) #-}
-    RefReaderTPure f <*> RefReaderTPure a = RefReaderTPure $ f a
-    mf <*> ma = RefReaderT $ \b -> runRefReaderT b mf <*> runRefReaderT b ma
-      where
-        runRefReaderT _ (RefReaderTPure a) = pure a
-        runRefReaderT b (RefReaderT x) = x b
-
-instance Monad m => Monad (RefReaderT m) where
---    {-# SPECIALIZE instance Monad (RefReaderT IO) #-}
-    {-# INLINE return #-}
-    return = return
-    {-# INLINE (>>=) #-}
-    RefReaderTPure r >>= f = f r
-    RefReaderT mr >>= f = RefReaderT $ \b -> mr b >>= runRefReaderT_ b . f
-
-{-# INLINE runRefReaderT_ #-}
-runRefReaderT_ _ (RefReaderTPure a) = return a
-runRefReaderT_ b (RefReaderT x) = x b
-
+-- trigger handlers
+-- The registered triggers may be killed, blocked and unblocked via the handlercollection.
+type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 
 ------------------------------
 
-{-# SPECIALIZE newReference :: a -> Register IO (Reference IO a) #-}
-newReference :: forall m a . NewRef m => a -> Register m (Reference m a)
+{-# SPECIALIZE newReference :: a -> Register IO (RefHandler IO a) #-}
+newReference :: forall m a . NewRef m => a -> Register m (RefHandler m a)
 newReference a = Register $ \st -> do
-    ir@(OrdRef i oir) <- newOrdRef st $ Dyn a mempty
+    ir@(OrdRef i oir) <- newOrdRef st $ RefState a mempty
 
-    return Reference
+    return RefHandler
         { readWrite = RefReaderT $ \b -> Register $ \st -> do
 
-            Dyn a nas <- readRef' oir
-            when b $ modRef' st $ deps %= Map.insert i oir
+            RefState a nas <- readRef' oir
+            when b $ modRef' st $ dependencycoll %= Map.insert i oir
 
             return $ (,) (unsafeCoerce a) $ \a -> do
 
-                writeRef' oir $ Dyn a nas
+                writeRef' oir $ RefState a nas
 
                 when (not $ Map.null nas) $ do
 
                     let ch :: TId m -> m [TId m]
                         ch (OrdRef _ n) = do
-                            UpdateFunState _ (OrdRef _ w) dep _ _ <- readRef' n
-                            Dyn _ revDep <- readRef' w
+                            TriggerState _ (OrdRef _ w) dep _ _ <- readRef' n
+                            RefState _ revDep <- readRef' w
                             fmap (map $ uncurry OrdRef) $ flip filterM (Map.toList revDep) $ \(_, na) -> do
-                                UpdateFunState alive (OrdRef i _) _ _ _ <- readRef' na
+                                TriggerState alive (OrdRef i _) _ _ _ <- readRef' na
                                 pure $ alive && not (Map.member i dep)
 
                         topSort [] = pure ()
@@ -216,18 +162,18 @@ newReference a = Register $ \st -> do
         , register = \init upd -> Register $ \st -> do
 
             let gv = do
-                    modRef' st $ deps %= mempty
+                    modRef' st $ dependencycoll %= mempty
                     a <- readRef' oir >>= upd . unsafeGet
                     h <- readRef' st
-                    return (a, h ^. deps)
+                    return (a, h ^. dependencycoll)
 
             (a, ih) <- gv
 
-            when init $ modRef' oir $ modify $ \(Dyn _ s) -> Dyn a s
+            when init $ modRef' oir $ modify $ \(RefState _ s) -> RefState a s
 
             OrdRef i ori <- newOrdRef st $ error "impossible"
 
-            let addRev, delRev :: SRef m (Dyn m) -> m ()
+            let addRev, delRev :: SRef m (RefState m) -> m ()
                 addRev x = modRef' x $ revDep %= Map.insert i ori
                 delRev x = modRef' x $ revDep %= Map.delete i
 
@@ -238,10 +184,10 @@ newReference a = Register $ \st -> do
                     mapM_ delRev $ Map.elems $ ih' `Map.difference` ih
                     mapM_ addRev $ Map.elems $ ih `Map.difference` ih'
 
-                    modRef' oir $ modify $ \(Dyn _ s) -> Dyn a s
+                    modRef' oir $ modify $ \(RefState _ s) -> RefState a s
                     modRef' ori $ dependencies .= ih
 
-            writeRef' ori $ UpdateFunState True ir ih modReg mempty
+            writeRef' ori $ TriggerState True ir ih modReg mempty
 
             mapM_ addRev $ Map.elems ih
 
@@ -256,12 +202,12 @@ newReference a = Register $ \st -> do
                 -- TODO
                 when (msg == Unblock) $ do
                     p <- readRef' st
-                    UpdateFunState _ _ _ x _ <- readRef' ori
+                    TriggerState _ _ _ x _ <- readRef' ori
                     _postpone p x
         }
 
-{-# SPECIALIZE joinReg :: RefReaderT IO (Reference IO a) -> Bool -> (a -> IO a) -> Register IO () #-}
-joinReg :: NewRef m => RefReaderT m (Reference m a) -> Bool -> (a -> m a) -> Register m ()
+{-# SPECIALIZE joinReg :: RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> Register IO () #-}
+joinReg :: NewRef m => RefReaderT m (RefHandler m a) -> Bool -> (a -> m a) -> Register m ()
 joinReg (RefReaderTPure r) init a = register r init a
 joinReg (RefReaderT m) init a = do
     st <- ask
@@ -274,11 +220,11 @@ joinReg (RefReaderT m) init a = do
         h <- runRefReaderT_ True $ readRef_ r
         runM h msg
 
-instance NewRef m => RefClass (Reference m) where
-    {-# SPECIALIZE instance RefClass (Reference IO) #-}
-    type RefReaderSimple (Reference m) = RefReaderT m
+instance NewRef m => RefClass (RefHandler m) where
+    {-# SPECIALIZE instance RefClass (RefHandler IO) #-}
+    type RefReaderSimple (RefHandler m) = RefReaderT m
 
-    unitRef = pure $ Reference
+    unitRef = pure $ RefHandler
         { readWrite = pure ((), const $ pure ())
         , register  = const $ const $ pure ()
         }
@@ -293,7 +239,7 @@ instance NewRef m => RefClass (Reference m) where
     writeRefSimple (RefReaderT mr) a
         = RefWriterT $ mr False >>= runRefReaderT_ False . readWrite >>= Register . const . ($ a) . (^. _2)
 
-    lensMap k mr = pure $ Reference
+    lensMap k mr = pure $ RefHandler
         { readWrite = (mr >>= readWrite) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
         , register = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
@@ -365,26 +311,38 @@ instance NewRef m => MonadRefCreator (Register m) where
 
 -------------------- aux
 
+{-# INLINE readRef_ #-}
+readRef_ :: NewRef m => RefHandler m a -> RefReaderT m a
+readRef_ r = readWrite r <&> fst
+
+{-# INLINE ask #-}
+ask :: Monad m => Register m (SRef m (GlobalVars m))
+ask = Register return
+
+{-# INLINE runRefReaderT_ #-}
+runRefReaderT_ _ (RefReaderTPure a) = return a
+runRefReaderT_ b (RefReaderT x) = x b
+
 runM m k = Register . const $ runMonadMonoid $ m k
 
 {-# INLINE tellHand #-}
 tellHand :: (NewRef m) => Handler m -> Register m ()
-tellHand h = Register $ \st -> modRef' st $ handler %= (`mappend` h)
+tellHand h = Register $ \st -> modRef' st $ handlercollection %= (`mappend` h)
 
 {-# INLINE dropHandler #-}
 dropHandler :: NewRef m => Register m a -> Register m a
 dropHandler m = Register $ \st -> do
     x <- readRef' st
     a <- unRegister m st
-    modRef' st $ handler .= (x ^. handler)
+    modRef' st $ handlercollection .= (x ^. handlercollection)
     return a
 
 {-# INLINE getHandler #-}
 getHandler :: NewRef m => Register m a -> Register m (Handler m, a)
 getHandler m = Register $ \st -> do
-    h' <- modRef' st $ replace handler mempty
+    h' <- modRef' st $ replace handlercollection mempty
     a <- unRegister m st
-    h <- modRef' st $ replace handler h'
+    h <- modRef' st $ replace handlercollection h'
     return (h, a)
 
 {-# INLINE replace #-}
@@ -395,52 +353,115 @@ replace k x = do
     return x'
 
 {-# INLINE unsafeGet #-}
-unsafeGet :: Dyn m -> a
-unsafeGet (Dyn a _) = unsafeCoerce a
+unsafeGet :: RefState m -> a
+unsafeGet (RefState a _) = unsafeCoerce a
+
+{-# INLINE newOrdRef #-}
+newOrdRef :: NewRef m => SRef m (GlobalVars m) -> a -> m (OrdRef m a)
+newOrdRef st a = do
+    GlobalVars x y z c <- readRef' st
+    writeRef' st $ GlobalVars x y z $ succ c
+    r <- newRef' a
+    return $ OrdRef c r
 
 -------------- lenses
 
-{-# INLINE handler #-}
-handler :: Lens' (Sta m) (Handler m)
-handler k (Sta a b c d) = k a <&> \a' -> Sta a' b c d
+{-# INLINE handlercollection #-}
+handlercollection :: Lens' (GlobalVars m) (Handler m)
+handlercollection k (GlobalVars a b c d) = k a <&> \a' -> GlobalVars a' b c d
 
-{-# INLINE deps #-}
-deps :: Lens' (Sta m) (Ids m)
-deps k (Sta a b c d) = k b <&> \b' -> Sta a b' c d
+{-# INLINE dependencycoll #-}
+dependencycoll :: Lens' (GlobalVars m) (Ids m)
+dependencycoll k (GlobalVars a b c d) = k b <&> \b' -> GlobalVars a b' c d
 
 {-# INLINE dependencies #-}
-dependencies :: Lens' (UpdateFunState m) (Ids m)
-dependencies k (UpdateFunState a b c d e) = k c <&> \c' -> UpdateFunState a b c' d e
+dependencies :: Lens' (TriggerState m) (Ids m)
+dependencies k (TriggerState a b c d e) = k c <&> \c' -> TriggerState a b c' d e
 
 {-# INLINE alive #-}
-alive :: Lens' (UpdateFunState m) Bool
-alive k (UpdateFunState a b c d e) = k a <&> \a' -> UpdateFunState a' b c d e
+alive :: Lens' (TriggerState m) Bool
+alive k (TriggerState a b c d e) = k a <&> \a' -> TriggerState a' b c d e
 
 {-# INLINE reverseDeps #-}
-reverseDeps :: Lens' (UpdateFunState m) (TIds m)
-reverseDeps k (UpdateFunState a b c d e) = k e <&> \e' -> UpdateFunState a b c d e'
+reverseDeps :: Lens' (TriggerState m) (TIds m)
+reverseDeps k (TriggerState a b c d e) = k e <&> \e' -> TriggerState a b c d e'
 
 {-# INLINE revDep #-}
-revDep :: Lens' (Dyn m) (TIds m)
-revDep k (Dyn a b) = k b <&> \b' -> Dyn a b'
+revDep :: Lens' (RefState m) (TIds m)
+revDep k (RefState a b) = k b <&> \b' -> RefState a b'
 
--------------------------------------------------------
+------------------------------------------------------- type class instances
+
+instance Monad m => Monoid (Register m ()) where
+--    {-# SPECIALIZE instance Monoid (Register IO ()) #-}
+    {-# INLINE mempty #-}
+    mempty = return ()
+    {-# INLINE mappend #-}
+    m `mappend` n = m >> n
+
+instance Monad m => Monad (Register m) where
+--    {-# SPECIALIZE instance Monad (Register IO) #-}
+    {-# INLINE return #-}
+    return = Register . const . return
+    {-# INLINE (>>=) #-}
+    Register m >>= f = Register $ \r -> m r >>= \a -> unRegister (f a) r
+
+instance Applicative m => Applicative (Register m) where
+--    {-# SPECIALIZE instance Applicative (Register IO) #-}
+    {-# INLINE pure #-}
+    pure = Register . const . pure
+    {-# INLINE (<*>) #-}
+    Register f <*> Register g = Register $ \r -> f r <*> g r
+
+instance Functor m => Functor (Register m) where
+--    {-# SPECIALIZE instance Functor (Register IO) #-}
+    {-# INLINE fmap #-}
+    fmap f (Register m) = Register $ fmap f . m
+
+instance MonadFix m => MonadFix (Register m) where
+--    {-# SPECIALIZE instance MonadFix (Register IO) #-}
+    mfix f = Register $ \r -> mfix $ \a -> unRegister (f a) r
+
+instance Functor m => Functor (RefReaderT m) where
+--    {-# SPECIALIZE instance Functor (RefReaderT IO) #-}
+    {-# INLINE fmap #-}
+    fmap f (RefReaderTPure x) = RefReaderTPure $ f x
+    fmap f (RefReaderT mr) = RefReaderT $ \b -> fmap f $ mr b
+
+instance Applicative m => Applicative (RefReaderT m) where
+--    {-# SPECIALIZE instance Applicative (RefReaderT IO) #-}
+    {-# INLINE pure #-}
+    pure = RefReaderTPure
+    {-# INLINE (<*>) #-}
+    RefReaderTPure f <*> RefReaderTPure a = RefReaderTPure $ f a
+    mf <*> ma = RefReaderT $ \b -> runRefReaderT b mf <*> runRefReaderT b ma
+      where
+        runRefReaderT _ (RefReaderTPure a) = pure a
+        runRefReaderT b (RefReaderT x) = x b
+
+instance Monad m => Monad (RefReaderT m) where
+--    {-# SPECIALIZE instance Monad (RefReaderT IO) #-}
+    {-# INLINE return #-}
+    return = return
+    {-# INLINE (>>=) #-}
+    RefReaderTPure r >>= f = f r
+    RefReaderT mr >>= f = RefReaderT $ \b -> mr b >>= runRefReaderT_ b . f
 
 instance NewRef m => MonadRefReader (Register m) where
     {-# SPECIALIZE instance MonadRefReader (Register IO) #-}
-    type BaseRef (Register m) = Reference m
+    type BaseRef (Register m) = RefHandler m
 --    {-# INLINE liftRefReader #-}
     liftRefReader = runRefReaderT_ False
 
 instance NewRef m => MonadRefReader (RefReaderT m) where
     {-# SPECIALIZE instance MonadRefReader (RefReaderT IO) #-}
-    type BaseRef (RefReaderT m) = Reference m
+    type BaseRef (RefReaderT m) = RefHandler m
 --    {-# INLINE liftRefReader #-}
     liftRefReader = id
 
 instance NewRef m => MonadRefReader (RefWriterOf (RefReaderT m)) where
     {-# SPECIALIZE instance MonadRefReader (RefWriterOf (RefReaderT IO)) #-}
-    type BaseRef (RefWriterOf (RefReaderT m)) = Reference m
+    type BaseRef (RefWriterOf (RefReaderT m)) = RefHandler m
 --    {-# INLINE liftRefReader #-}
     liftRefReader = RefWriterT . runRefReaderT_ False
 
@@ -472,7 +493,26 @@ instance NewRef m => MonadRegister (Register m) where
         p <- Register . const $ readRef' r
         return $ \f -> _postpone p . flip unRegister r . runRefWriterT $ f
 
---------------------------
+instance NewRef IO where
+    type SRef IO = IORef
+
+--    {-# INLINE newRef' #-}
+    newRef' x = newIORef x
+--    {-# INLINE readRef' #-}
+    readRef' r = readIORef r
+--    {-# INLINE writeRef' #-}
+    writeRef' r a = writeIORef r a
+
+instance Eq (OrdRef m a) where
+--    {-# SPECIALIZE instance Eq (OrdRef IO a) #-}
+    OrdRef i _ == OrdRef j _ = i == j
+
+instance Ord (OrdRef m a) where
+--    {-# SPECIALIZE instance Ord (OrdRef IO a) #-}
+    OrdRef i _ `compare` OrdRef j _ = i `compare` j
+
+
+-------------------------- running
 
 runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
@@ -481,7 +521,7 @@ runRegister newChan m = do
 
 runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    r <- newRef' $ Sta mempty mempty write 0
+    r <- newRef' $ GlobalVars mempty mempty write 0
     a <- flip unRegister r m
     pure $ (,) a $ forever $ join read
 
@@ -509,39 +549,6 @@ runPTest name m = do
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 runPerformanceTests _ = fail "enable the tests flag"
 #endif
-
-
-----------------------------------------------
-
-data OrdRef m a = OrdRef !Int !(SRef m a)
-
-instance Eq (OrdRef m a) where
---    {-# SPECIALIZE instance Eq (OrdRef IO a) #-}
-    OrdRef i _ == OrdRef j _ = i == j
-
-instance Ord (OrdRef m a) where
---    {-# SPECIALIZE instance Ord (OrdRef IO a) #-}
-    OrdRef i _ `compare` OrdRef j _ = i `compare` j
-
-{-# INLINE newOrdRef #-}
-newOrdRef :: NewRef m => SRef m (Sta m) -> a -> m (OrdRef m a)
-newOrdRef st a = do
-    Sta x y z c <- readRef' st
-    writeRef' st $ Sta x y z $ succ c
-    r <- newRef' a
-    return $ OrdRef c r
-
-type OrdRefSet m a = Map.IntMap (SRef m a)
-
-instance NewRef IO where
-    type SRef IO = IORef
-
---    {-# INLINE newRef' #-}
-    newRef' x = newIORef x
---    {-# INLINE readRef' #-}
-    readRef' r = readIORef r
---    {-# INLINE writeRef' #-}
-    writeRef' r a = writeIORef r a
 
 
 
