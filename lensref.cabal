@@ -102,4 +102,13 @@ test-suite runtests
                     base < 5
                   , lensref
 
+benchmark lensref-performance-test
+
+  type:             exitcode-stdio-1.0
+  main-is:          runperftest.hs
+  build-depends:
+                    base < 5
+                  , criterion
+                  , lensref
+
 

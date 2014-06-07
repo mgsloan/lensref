@@ -55,7 +55,7 @@ instance NewRef (Prog t) where
     type SRef (Prog t) = SRefProg t 
     newRef' = singleton . NewRef
     modRef' = runSRefProg
-    newId = singleton NewId
+--    newId = singleton NewId
 
 instance MonadEffect (Prog t) where
     type EffectM (Prog t) = Prog t

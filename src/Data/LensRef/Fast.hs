@@ -21,7 +21,7 @@ module Data.LensRef.Fast
     , runPerformanceTests
     ) where
 
---import Debug.Trace
+import Debug.Trace
 import Data.Maybe
 import Data.Monoid
 import Data.IORef
@@ -32,7 +32,6 @@ import Control.Monad.State
 import Control.Lens.Simple
 
 import Unsafe.Coerce
-import System.IO.Unsafe
 
 import Data.LensRef.Class
 import Data.LensRef.Common
@@ -111,6 +110,7 @@ data Sta m = Sta
     { _handler  :: Handler m
     , _deps     :: Ids m
     , _postpone :: (m () -> m ())
+    , _counters :: !Int
     }
 
 data UpdateFunState m = UpdateFunState
@@ -167,13 +167,10 @@ runRefReaderT_ b (RefReaderT x) = x b
 
 ------------------------------
 
-{-# INLINE newReference #-}
-newReference = Register . const . newReference_
-
-{-# SPECIALIZE newReference_ :: a -> IO (Reference IO a) #-}
-newReference_ :: forall m a . NewRef m => a -> m (Reference m a)
-newReference_ a = do
-    ir@(OrdRef i oir) <- newOrdRef $ Dyn a mempty
+{-# SPECIALIZE newReference :: a -> Register IO (Reference IO a) #-}
+newReference :: forall m a . NewRef m => a -> Register m (Reference m a)
+newReference a = Register $ \st -> do
+    ir@(OrdRef i oir) <- newOrdRef st $ Dyn a mempty
 
     return Reference
         { readWrite = RefReaderT $ \b -> Register $ \st -> do
@@ -228,7 +225,7 @@ newReference_ a = do
 
             when init $ modRef' oir $ modify $ \(Dyn _ s) -> Dyn a s
 
-            OrdRef i ori <- newOrdRef $ error "impossible"
+            OrdRef i ori <- newOrdRef st $ error "impossible"
 
             let addRev, delRev :: SRef m (Dyn m) -> m ()
                 addRev x = modRef' x $ revDep %= Map.insert i ori
@@ -304,7 +301,7 @@ instance NewRef m => RefClass (Reference m) where
 instance NewRef m => MonadRefCreator (Register m) where
     {-# SPECIALIZE instance MonadRefCreator (Register IO) #-}
 
-    newRef = Register . const . fmap pure . newReference_
+    newRef = fmap pure . newReference
 
     extRef m k a0 = do
         st <- ask
@@ -379,7 +376,7 @@ dropHandler :: NewRef m => Register m a -> Register m a
 dropHandler m = Register $ \st -> do
     x <- readRef' st
     a <- unRegister m st
-    writeRef' st x
+    modRef' st $ handler .= (x ^. handler)
     return a
 
 {-# INLINE getHandler #-}
@@ -405,11 +402,11 @@ unsafeGet (Dyn a _) = unsafeCoerce a
 
 {-# INLINE handler #-}
 handler :: Lens' (Sta m) (Handler m)
-handler k (Sta a b c) = k a <&> \a' -> Sta a' b c
+handler k (Sta a b c d) = k a <&> \a' -> Sta a' b c d
 
 {-# INLINE deps #-}
 deps :: Lens' (Sta m) (Ids m)
-deps k (Sta a b c) = k b <&> \b' -> Sta a b' c
+deps k (Sta a b c d) = k b <&> \b' -> Sta a b' c d
 
 {-# INLINE dependencies #-}
 dependencies :: Lens' (UpdateFunState m) (Ids m)
@@ -484,7 +481,7 @@ runRegister newChan m = do
 
 runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    r <- newRef' $ Sta mempty mempty write
+    r <- newRef' $ Sta mempty mempty write 0
     a <- flip unRegister r m
     pure $ (,) a $ forever $ join read
 
@@ -505,7 +502,7 @@ assertEq a b = fail $ show a ++ " /= " ++ show b
 
 runPTest :: String -> Register IO () -> IO ()
 runPTest name m = do
-    putStrLn name
+--    putStrLn name
     _ <- runRegister_ undefined (const $ return ()) m
     return ()
 #else
@@ -527,12 +524,14 @@ instance Ord (OrdRef m a) where
     OrdRef i _ `compare` OrdRef j _ = i `compare` j
 
 {-# INLINE newOrdRef #-}
-newOrdRef :: NewRef m => a -> m (OrdRef m a)
-newOrdRef a = liftM2 OrdRef newId (newRef' a)
+newOrdRef :: NewRef m => SRef m (Sta m) -> a -> m (OrdRef m a)
+newOrdRef st a = do
+    Sta x y z c <- readRef' st
+    writeRef' st $ Sta x y z $ succ c
+    r <- newRef' a
+    return $ OrdRef c r
 
 type OrdRefSet m a = Map.IntMap (SRef m a)
-
-counter = unsafePerformIO $ newIORef (0 :: Int)
 
 instance NewRef IO where
     type SRef IO = IORef
@@ -543,11 +542,6 @@ instance NewRef IO where
     readRef' r = readIORef r
 --    {-# INLINE writeRef' #-}
     writeRef' r a = writeIORef r a
---    {-# INLINE newId #-}
-    newId = do
-        c <- readIORef counter
-        writeIORef counter $! succ c
-        return c
 
 
 

@@ -18,6 +18,7 @@ module Data.LensRef.Pure
     ( Register
     , runRegister
     , runTests
+    , runPerformanceTests
     ) where
 
 -- import Data.Monoid
@@ -396,8 +397,21 @@ runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' (
 runTest name = runTest_ name (TP . RefWriterT . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
 
 newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
+
+runPerformanceTests :: Int -> IO ()
+runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
+
+assertEq a b | a == b = return ()
+assertEq a b = fail $ show a ++ " /= " ++ show b
+
+runPTest :: String -> Register IO () -> IO ()
+runPTest name m = do
+--    putStrLn name
+    _ <- runRegister_ undefined (const $ return ()) m
+    return ()
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
+runPerformanceTests _ = fail "enable the tests flag"
 #endif
 
 --------------------------

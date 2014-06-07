@@ -58,8 +58,6 @@ class (Monad m, Applicative m) => NewRef m where
     writeRef' :: SRef m a -> a -> m ()
     writeRef' r a = modRef' r $ put a
 
-    newId     :: m Int
-
 
 ---------------------------
 
