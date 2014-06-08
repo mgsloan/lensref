@@ -7,7 +7,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 --{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE CPP #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
 
@@ -17,8 +16,7 @@ TODO
 -}
 module Data.LensRef.Fast
     ( Register
-    , runTests
-    , runPerformanceTests
+    , liftRefWriter'
     ) where
 
 --import Debug.Trace
@@ -34,10 +32,6 @@ import Unsafe.Coerce
 
 import Data.LensRef.Class
 import Data.LensRef.Common
-#ifdef __TESTS__
-import Data.LensRef.TestEnv hiding (listen, Id)
-import Data.LensRef.Test
-#endif
 
 ----------------------------------- data types
 
@@ -325,6 +319,10 @@ runRefReaderT_ b (RefReaderT x) = x b
 
 runM m k = Register . const $ runMonadMonoid $ m k
 
+{-# NOINLINE liftRefWriter' #-}
+liftRefWriter' :: RefWriterOf (RefReaderT m) a -> Register m a
+liftRefWriter' = runRefWriterT
+
 {-# INLINE tellHand #-}
 tellHand :: (NewRef m) => Handler m -> Register m ()
 tellHand h = Register $ \st -> modRef' st $ handlercollection %= (`mappend` h)
@@ -503,30 +501,4 @@ instance Eq (OrdRef m a) where
 instance Ord (OrdRef m a) where
 --    {-# SPECIALIZE instance Ord (OrdRef IO a) #-}
     OrdRef i _ `compare` OrdRef j _ = i `compare` j
-
-liftRefWriter' = runRefWriterT
-
--------------------------- running
-
-runTests :: IO ()
-#ifdef __TESTS__
-runTests = tests liftRefWriter' runTest
-
-runTest :: (Eq a, Show a) => String -> Register (Prog) a -> Prog' (a, Prog' ()) -> IO ()
-runTest = runTest_
-
-runPerformanceTests :: Int -> IO ()
-runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
-
-assertEq a b | a == b = return ()
-assertEq a b = fail $ show a ++ " /= " ++ show b
-
-runPTest :: String -> Register IO () -> IO ()
-runPTest name m = do
---    putStrLn name
-    runRegister (const $ return ()) m
-#else
-runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
-runPerformanceTests _ = fail "enable the tests flag"
-#endif
 

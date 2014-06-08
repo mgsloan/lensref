@@ -341,12 +341,12 @@ eval__  op = do
     Return x -> pure $ Left x
 
 
-runTest_ :: (Eq a, Show a, MonadRegister tm, EffectM tm ~ Prog)
+runTest :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog)
     => String
-    -> tm a
+    -> m a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
+runTest name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
     (Just a1, pe) <- coeval_ (runRegister (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2

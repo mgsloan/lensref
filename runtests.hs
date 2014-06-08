@@ -1,12 +1,17 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
-import Data.LensRef.Pure
-import Data.LensRef.Fast
+#ifndef __TESTS__
+main :: IO ()
+main = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
+#else
+import Data.LensRef.Test
 
 main :: IO ()
 main = do
     putStrLn "running tests for the pure implementation"
-    Data.LensRef.Pure.runTests
+    runTestsPure
     putStrLn "running tests for the fast implementation"
-    Data.LensRef.Fast.runTests
+    runTests
+#endif
 

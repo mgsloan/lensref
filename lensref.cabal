@@ -76,8 +76,6 @@ library
   other-modules:
                     Control.Lens.Simple
   if flag(tests)
-    cpp-options:
-                    -D__TESTS__
     build-depends:
                     operational < 0.3
                   , QuickCheck >= 2 && < 2.8
@@ -101,6 +99,9 @@ test-suite runtests
   build-depends:
                     base < 5
                   , lensref
+  if flag(tests)
+    cpp-options:
+                    -D__TESTS__
 
 benchmark lensref-performance-test
 
@@ -110,5 +111,8 @@ benchmark lensref-performance-test
                     base < 5
                   , criterion
                   , lensref
+  if flag(tests)
+    cpp-options:
+                    -D__TESTS__
 
 

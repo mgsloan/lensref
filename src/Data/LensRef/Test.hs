@@ -6,8 +6,10 @@
 -- | Tests for the lens references interface.
 module Data.LensRef.Test
     ( -- * Tests for the interface
-      tests
-    , performanceTests
+      runTests
+    , runTestsPure
+    , runPerformanceTests
+    , runPerformanceTestsPure
     ) where
 
 import Data.Maybe
@@ -21,17 +23,35 @@ import Control.Lens.Simple
 import Data.LensRef
 import Data.LensRef.Class
 import Data.LensRef.TestEnv
+import Data.LensRef.Fast as Fast
+import Data.LensRef.Pure as Pure
 
 -----------------------------------------------------------------
 
--- | Look inside the sources for the tests.
-tests :: forall m k n
-     . (MonadRegister m, EffectM m ~ Prog, Monad n)
-    => (forall b . RefWriter m b -> m b)
-    -> (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
-    -> n ()
+runTests :: IO ()
+runTests = tests Fast.liftRefWriter'
 
-tests liftRefWriter' runTest = do
+runPerformanceTests :: Int -> IO ()
+runPerformanceTests = performanceTests Fast.liftRefWriter'
+
+runTestsPure :: IO ()
+runTestsPure = tests Pure.liftRefWriter'
+
+runPerformanceTestsPure :: Int -> IO ()
+runPerformanceTestsPure = performanceTests Pure.liftRefWriter'
+
+runTest__ = runTest
+
+-- | Look inside the sources for the tests.
+tests :: forall m
+     . (MonadRegister m, EffectM m ~ Prog)
+    => (forall b . RefWriter m b -> m b)
+    -> IO ()
+
+tests liftRefWriter' = do
+
+    let runTest :: (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> IO ()
+        runTest = runTest__
 
     let writeRef' :: Ref m c -> c -> m ()
         writeRef' r = liftRefWriter' . writeRefSimple r
@@ -740,17 +760,22 @@ tests liftRefWriter' runTest = do
 --            message' "x"
             send 1 "f"
 --            message' "f"
--}        
+-}
+    return ()
 
-performanceTests :: forall m n
-     . (MonadRegister m, Monad n)
+performanceTests :: forall m
+     . (MonadRegister m)
     => (forall b . RefWriter m b -> m b)
-    -> (forall x . (Eq x, Show x) => x -> x -> m ())          -- asserted eq
-    -> (String -> m () -> n ())
     -> Int
-    -> n ()
+    -> EffectM m ()
 
-performanceTests liftRefWriter' (==?) runTest n = do
+performanceTests liftRefWriter' n = do
+
+    let
+        runTest name m = runRegister (const $ return ()) m
+
+        a ==? b | a == b = return ()
+        a ==? b = fail $ show a ++ " /= " ++ show b
 
     let writeRef' :: Ref m c -> c -> m ()
         writeRef' r = liftRefWriter' . writeRefSimple r

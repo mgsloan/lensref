@@ -6,7 +6,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE CPP #-}
 {- |
 Reference implementation for the "Data.LensRef.Class" interface.
 
@@ -16,8 +15,7 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 
 module Data.LensRef.Pure
     ( Register
-    , runTests
-    , runPerformanceTests
+    , liftRefWriter'
     ) where
 
 -- import Data.Monoid
@@ -38,10 +36,6 @@ import Unsafe.Coerce
 
 import Data.LensRef.Class
 import Data.LensRef.Common
-#ifdef __TESTS__
-import Data.LensRef.TestEnv hiding (Id)
-import Data.LensRef.Test
-#endif
 
 ---------------------------------
 
@@ -381,31 +375,7 @@ instance (NewRef m) => MonadRegister (Register m) where
         let run' = modRef' r
         run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) $ m
 
-----------------------
-
-runTests :: IO ()
-#ifdef __TESTS__
-runTests = tests liftRefWriter' runTest
-
-runTest :: (Eq a, Show a) => String -> Register (Prog) a -> Prog' (a, Prog' ()) -> IO ()
-runTest = runTest_
-
-runPerformanceTests :: Int -> IO ()
-runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
-
-assertEq a b | a == b = return ()
-assertEq a b = fail $ show a ++ " /= " ++ show b
-
-runPTest :: String -> Register IO () -> IO ()
-runPTest name m = do
---    putStrLn name
-    runRegister (const $ return ()) m
-#else
-runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
-runPerformanceTests _ = fail "enable the tests flag"
-#endif
-
---------------------------
+-------------------------- aux
 
 -- | topological sorting on component
 topSortComponent
@@ -421,7 +391,7 @@ topSortComponent ch a = topSort (walk a) [a]
       where
         xs = ch p
         par' = foldr (Map.adjust $ filter (/= p)) (Map.delete p par) xs
-        ys = sort $ filter (null . (par' Map.!)) xs    -- TODO: eliminate sort
+        ys = filter (null . (par' Map.!)) xs
 
     walk v = execState (collects v) $ Map.singleton v []
 
