@@ -373,30 +373,34 @@ instance (MonadEffect m) => MonadEffect (ReaderT w m) where
     type EffectM (ReaderT w m) = EffectM m
     liftEffectM = lift . liftEffectM
 
-instance (MonadRefCreator m, n ~ RefWriter m, k ~ EffectM m) => MonadRegister (ReaderT (n () -> k ()) m) where
+instance (NewRef m) => MonadRegister (Register m) where
     askPostpone = ask
 
---------------------------
+    runRegister' write m = do
+        r <- newRef' mempty
+        let run = modRef' r
+        let run' = modRef' r
+        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) $ m
 
-runRegister :: (Monad m, Applicative m) => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
+----------------------
+
+runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
     (read, write) <- newChan
     runRegister_ read write m
 
-runRegister_ :: (Monad m, Applicative m) => m (RefWriterT m ()) -> (RefWriterT m () -> m ()) -> Register m a -> m (a, m ())
+runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    (a, s) <- flip runStateT mempty . fmap fst . runWriterT . flip runReaderT (write . liftRefWriter) $ m
-    pure $ (,) a $ flip evalStateT s $ forever $ join $ lift $ fmap runRefWriterT read
+    a <- runRegister' write m
+    pure $ (,) a $ forever $ join read
 
 
 runTests :: IO ()
 #ifdef __TESTS__
 runTests = tests liftRefWriter' runTest
 
-runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name (TP . RefWriterT . lift) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
-
-newtype TP = TP { unTP :: RefWriterT (Prog TP) () }
+runTest :: (Eq a, Show a) => String -> Register (Prog) a -> Prog' (a, Prog' ()) -> IO ()
+runTest name = runTest_ name id $ \r w -> runRegister_ (fmap id r) (w)
 
 runPerformanceTests :: Int -> IO ()
 runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest

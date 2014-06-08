@@ -7,6 +7,7 @@
 module Data.LensRef.Common where
 
 import Data.Monoid
+import Data.IORef
 import Control.Applicative
 import Control.Monad.State
 
@@ -57,6 +58,17 @@ class (Monad m, Applicative m) => NewRef m where
 
     writeRef' :: SRef m a -> a -> m ()
     writeRef' r a = modRef' r $ put a
+
+instance NewRef IO where
+    type SRef IO = IORef
+
+--    {-# INLINE newRef' #-}
+    newRef' x = newIORef x
+--    {-# INLINE readRef' #-}
+    readRef' r = readIORef r
+--    {-# INLINE writeRef' #-}
+    writeRef' r a = writeIORef r a
+
 
 
 ---------------------------

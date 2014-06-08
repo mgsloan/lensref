@@ -6,6 +6,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+--{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE CPP #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
@@ -488,20 +489,13 @@ instance NewRef m => MonadEffect (Register m) where
 
 instance NewRef m => MonadRegister (Register m) where
 --    {-# SPECIALIZE instance MonadRegister (Register IO) #-}
-    askPostpone = do
-        r <- ask
-        p <- Register . const $ readRef' r
-        return $ \f -> _postpone p . flip unRegister r . runRefWriterT $ f
+    askPostpone = Register $ \st -> do
+        p <- readRef' st
+        return $ _postpone p . flip unRegister st . runRefWriterT
 
-instance NewRef IO where
-    type SRef IO = IORef
-
---    {-# INLINE newRef' #-}
-    newRef' x = newIORef x
---    {-# INLINE readRef' #-}
-    readRef' r = readIORef r
---    {-# INLINE writeRef' #-}
-    writeRef' r a = writeIORef r a
+    runRegister' write m = do
+        s <- newRef' $ GlobalVars mempty mempty write 0
+        unRegister m s
 
 instance Eq (OrdRef m a) where
 --    {-# SPECIALIZE instance Eq (OrdRef IO a) #-}
@@ -511,8 +505,10 @@ instance Ord (OrdRef m a) where
 --    {-# SPECIALIZE instance Ord (OrdRef IO a) #-}
     OrdRef i _ `compare` OrdRef j _ = i `compare` j
 
+liftRefWriter' = runRefWriterT
 
 -------------------------- running
+
 
 runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
 runRegister newChan m = do
@@ -521,21 +517,19 @@ runRegister newChan m = do
 
 runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
 runRegister_ read write m = do
-    r <- newRef' $ GlobalVars mempty mempty write 0
-    a <- flip unRegister r m
+    a <- runRegister' write m
     pure $ (,) a $ forever $ join read
+
 
 runTests :: IO ()
 #ifdef __TESTS__
-runTests = tests runRefWriterT runTest
+runTests = tests liftRefWriter' runTest
 
-runTest :: (Eq a, Show a) => String -> Register (Prog TP) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name (TP) $ \r w -> runRegister_ (fmap unTP r) (w . TP)
-
-newtype TP = TP { unTP :: Prog TP () }
+runTest :: (Eq a, Show a) => String -> Register (Prog) a -> Prog' (a, Prog' ()) -> IO ()
+runTest name = runTest_ name id $ \r w -> runRegister_ (fmap id r) (w)
 
 runPerformanceTests :: Int -> IO ()
-runPerformanceTests = performanceTests runRefWriterT assertEq runPTest
+runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
 
 assertEq a b | a == b = return ()
 assertEq a b = fail $ show a ++ " /= " ++ show b
@@ -549,6 +543,4 @@ runPTest name m = do
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 runPerformanceTests _ = fail "enable the tests flag"
 #endif
-
-
 

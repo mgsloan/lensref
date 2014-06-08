@@ -26,7 +26,7 @@ import Data.LensRef.TestEnv
 
 -- | Look inside the sources for the tests.
 tests :: forall m k n
-     . (MonadRegister m, EffectM m ~ Prog k, Monad n)
+     . (MonadRegister m, EffectM m ~ Prog, Monad n)
     => (forall b . RefWriter m b -> m b)
     -> (forall a . (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> n ())
     -> n ()

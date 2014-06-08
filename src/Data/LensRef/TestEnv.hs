@@ -35,43 +35,43 @@ newtype Port a = Port { unPort :: Int } deriving (Eq, Num)
 
 instance Show (Port a) where show (Port i) = show i
 
-data Inst t a where
-    Message  :: String -> Inst t ()
-    Listen   :: Show b => Port b -> (b -> Prog t ()) -> Inst t Id
-    SetStatus  :: Id -> RegionStatusChange -> Inst t ()
+data Inst a where
+    Message  :: String -> Inst ()
+    Listen   :: Show b => Port b -> (b -> Prog ()) -> Inst Id
+    SetStatus  :: Id -> RegionStatusChange -> Inst ()
 
-    ReadI :: Inst t t
-    WriteI :: t -> Inst t ()
-    NewRef :: a -> Inst t (SRef (Prog t) a)
-    NewId :: Inst t Int
+    ReadI :: Inst (Prog ())
+    WriteI :: Prog () -> Inst ()
+    NewRef :: a -> Inst (SRef (Prog) a)
+    NewId :: Inst Int
 
-type Prog t = ProgramT (Inst t) (State (Int, Seq.Seq Any))
+type Prog = ProgramT (Inst) (State (Int, Seq.Seq Any))
 
 ---------------------------------------------------
 
-newtype SRefProg t a = SRefProg { runSRefProg :: forall x . StateT a (Prog t) x -> Prog t x }
+newtype SRefProg a = SRefProg { runSRefProg :: forall x . StateT a (Prog) x -> Prog x }
 
-instance NewRef (Prog t) where
-    type SRef (Prog t) = SRefProg t 
+instance NewRef (Prog) where
+    type SRef (Prog) = SRefProg 
     newRef' = singleton . NewRef
     modRef' = runSRefProg
 --    newId = singleton NewId
 
-instance MonadEffect (Prog t) where
-    type EffectM (Prog t) = Prog t
+instance MonadEffect (Prog) where
+    type EffectM (Prog) = Prog
     liftEffectM = id
 
-message :: (MonadEffect m, EffectM m ~ Prog t) => String -> m ()
+message :: (MonadEffect m, EffectM m ~ Prog) => String -> m ()
 message = liftEffectM . singleton . Message
 
 infix 0 ==?
 
 -- | Check an equality.
---(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog n, MonadRegister (RefWriter m)) => a -> a -> m ()
+--(==?) :: (Eq a, Show a, MonadRegister m, EffectM m ~ Prog, MonadRegister (RefWriter m)) => a -> a -> m ()
 rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
 
 
-listen :: (MonadRegister m, EffectM m ~ Prog t, Show a) => Port a -> (a -> RefWriter m ()) -> m ()
+listen :: (MonadRegister m, EffectM m ~ Prog, Show a) => Port a -> (a -> RefWriter m ()) -> m ()
 listen i m = do
     post <- askPostpone
     id <- liftEffectM . singleton $ Listen i $ post . m
@@ -125,52 +125,52 @@ showRes name ((),l) = case f [] l of
 
 data Any = forall x . Any x
 
-data Listener m = forall a . Show a => Listener
+data Listener = forall a . Show a => Listener
     { _listenerId :: Id
     , _listenerPort :: Port a
     , _listenerStatus :: RegionStatusChange
-    , _listenerCallback :: a -> Prog m ()
+    , _listenerCallback :: a -> Prog ()
     }
 --makeLenses ''Listener
 
-listenerId :: Lens' (Listener m) Id
+listenerId :: Lens' (Listener) Id
 listenerId k (Listener a b c d) = k a <&> \a' -> Listener a' b c d
 
-data ST m = ST
-    { _postponed :: [m]
-    , _listeners :: [Listener m]
+data ST = ST
+    { _postponed :: [Prog ()]
+    , _listeners :: [Listener]
     , _idcounter :: Int
     , _vars :: (Int, Seq.Seq Any)
     }
 --makeLenses ''ST
 
-postponed :: Lens' (ST m) [m]
+postponed :: Lens' (ST) [Prog ()]
 postponed k (ST a b c d) = k a <&> \a' -> ST a' b c d
 
-listeners :: Lens' (ST m) [Listener m]
+listeners :: Lens' (ST) [Listener]
 listeners k (ST a b c d) = k b <&> \b' -> ST a b' c d
 
-idcounter :: Lens' (ST m) Int
+idcounter :: Lens' (ST) Int
 idcounter k (ST a b c d) = k c <&> \c' -> ST a b c' d
 
-vars :: Lens' (ST m) (Int, Seq.Seq Any)
+vars :: Lens' (ST) (Int, Seq.Seq Any)
 vars k (ST a b c d) = k d <&> \d' -> ST a b c d'
 
 
-coeval_ :: forall a b m
-     . (Prog m () -> m)
-    -> Prog m a
+coeval_ :: forall a b
+     . (Prog () -> Prog ())
+    -> Prog a
     -> Prog' b
-    -> StateT (ST m) Er (Maybe a, Prog' b)
+    -> StateT (ST) Er (Maybe a, Prog' b)
 coeval_ lift_ q p = do
     op <- zoom vars $ mapStateT lift $ viewT q
     coeval__ lift_ op p
 
-coeval__ :: forall a b m
-     . (Prog m () -> m)
-    -> ProgramViewT (Inst m) (State (Int, Seq.Seq Any)) a
+coeval__ :: forall a b
+     . (Prog () -> Prog ())
+    -> ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
     -> Prog' b
-    -> StateT (ST m) Er (Maybe a, Prog' b)
+    -> StateT (ST) Er (Maybe a, Prog' b)
 coeval__ lift_ op p = do
   nopostponed <- use $ postponed . to null
   case (op, view p) of
@@ -228,7 +228,7 @@ coeval__ lift_ op p = do
     (NewRef a :>>= k, _) -> do
         n <- use $ vars . _2 . to Seq.length
 
-        let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
+        let ff :: forall aa bb . aa -> StateT aa (Prog) bb -> Prog bb
             ff _ (StateT f) = do
                 v <- gets $ (`Seq.index` n) . snd
                 modify $ over _2 $ Seq.update n $ error "recursive reference modification"
@@ -261,18 +261,18 @@ coeval__ lift_ op p = do
 type Er' = Writer [Either (Either String String) String] --ErrorT String (Writer [String])
 
 
-eval_ :: forall a m
-     . (Prog m () -> m)
-    -> Prog m a
-    -> StateT (ST m) Er' (Either a (m -> Prog m a))
+eval_ :: forall a
+     . (Prog () -> Prog ())
+    -> Prog a
+    -> StateT (ST) Er' (Either a (Prog () -> Prog a))
 eval_ lift_ q = do
     op <- zoom vars $ mapStateT lift $ viewT q
     eval__ lift_ op
 
-eval__ :: forall a m
-     . (Prog m () -> m)
-    -> ProgramViewT (Inst m) (State (Int, Seq.Seq Any)) a
-    -> StateT (ST m) Er' (Either a (m -> Prog m a))
+eval__ :: forall a
+     . (Prog () -> Prog ())
+    -> ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
+    -> StateT (ST) Er' (Either a (Prog () -> Prog a))
 eval__ lift_ op = do
   nopostponed <- use $ postponed . to null
   case op of
@@ -314,7 +314,7 @@ eval__ lift_ op = do
     NewRef a :>>= k -> do
         n <- use $ vars . _2 . to Seq.length
 
-        let ff :: forall aa bb . aa -> StateT aa (Prog m) bb -> Prog m bb
+        let ff :: forall aa bb . aa -> StateT aa (Prog) bb -> Prog bb
             ff _ (StateT f) = do
                 v <- gets $ (`Seq.index` n) . snd
                 modify $ over _2 $ Seq.update n $ error "recursive reference modification"
@@ -345,10 +345,10 @@ eval__ lift_ op = do
     Return x -> pure $ Left x
 
 
-runTest_ :: (Eq a, Show a, m ~ Prog n)
+runTest_ :: (Eq a, Show a, m ~ Prog)
     => String
-    -> (Prog n () -> n)
-    -> (m n -> (n -> m ()) -> tm a -> m (a, m ()))
+    -> (Prog () -> Prog ())
+    -> (m (Prog ()) -> (Prog () -> m ()) -> tm a -> m (a, m ()))
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
