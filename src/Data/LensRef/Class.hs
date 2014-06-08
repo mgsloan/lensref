@@ -259,7 +259,7 @@ class MonadRefCreator m => MonadRegister m where        -- MonadPostpone
 
     askPostpone :: m (RefWriter m () -> EffectM m ())
 
-    runRegister' :: (EffectM m () -> EffectM m ()) -> m a -> EffectM m a
+    runRegister :: (EffectM m () -> EffectM m ()) -> m a -> EffectM m a
 
 -- | TODO
 data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)

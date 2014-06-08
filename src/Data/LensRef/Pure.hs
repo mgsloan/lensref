@@ -16,7 +16,6 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 
 module Data.LensRef.Pure
     ( Register
-    , runRegister
     , runTests
     , runPerformanceTests
     ) where
@@ -376,7 +375,7 @@ instance (MonadEffect m) => MonadEffect (ReaderT w m) where
 instance (NewRef m) => MonadRegister (Register m) where
     askPostpone = ask
 
-    runRegister' write m = do
+    runRegister write m = do
         r <- newRef' mempty
         let run = modRef' r
         let run' = modRef' r
@@ -384,23 +383,12 @@ instance (NewRef m) => MonadRegister (Register m) where
 
 ----------------------
 
-runRegister :: NewRef m => (forall a . m (m a, a -> m ())) -> Register m a -> m (a, m ())
-runRegister newChan m = do
-    (read, write) <- newChan
-    runRegister_ read write m
-
-runRegister_ :: NewRef m => (m (m ())) -> (m () -> m ()) -> Register m a -> m (a, m ())
-runRegister_ read write m = do
-    a <- runRegister' write m
-    pure $ (,) a $ forever $ join read
-
-
 runTests :: IO ()
 #ifdef __TESTS__
 runTests = tests liftRefWriter' runTest
 
 runTest :: (Eq a, Show a) => String -> Register (Prog) a -> Prog' (a, Prog' ()) -> IO ()
-runTest name = runTest_ name id $ \r w -> runRegister_ (fmap id r) (w)
+runTest = runTest_
 
 runPerformanceTests :: Int -> IO ()
 runPerformanceTests = performanceTests liftRefWriter' assertEq runPTest
@@ -411,8 +399,7 @@ assertEq a b = fail $ show a ++ " /= " ++ show b
 runPTest :: String -> Register IO () -> IO ()
 runPTest name m = do
 --    putStrLn name
-    _ <- runRegister_ undefined (const $ return ()) m
-    return ()
+    runRegister (const $ return ()) m
 #else
 runTests = fail "enable the tests flag like \'cabal configure --enable-tests -ftests; cabal build; cabal test\'"
 runPerformanceTests _ = fail "enable the tests flag"

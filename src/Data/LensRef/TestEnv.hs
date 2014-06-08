@@ -158,42 +158,40 @@ vars k (ST a b c d) = k d <&> \d' -> ST a b c d'
 
 
 coeval_ :: forall a b
-     . (Prog () -> Prog ())
-    -> Prog a
+     . Prog a
     -> Prog' b
     -> StateT (ST) Er (Maybe a, Prog' b)
-coeval_ lift_ q p = do
+coeval_  q p = do
     op <- zoom vars $ mapStateT lift $ viewT q
-    coeval__ lift_ op p
+    coeval__  op p
 
 coeval__ :: forall a b
-     . (Prog () -> Prog ())
-    -> ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
+     . ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
     -> Prog' b
     -> StateT (ST) Er (Maybe a, Prog' b)
-coeval__ lift_ op p = do
+coeval__  op p = do
   nopostponed <- use $ postponed . to null
   case (op, view p) of
 
     (_, Error' s :>>= k) -> do
         unfail s
-        coeval__ lift_ op $ k ()
+        coeval__  op $ k ()
 
     (Message s :>>= k, Return x) -> do
         fail' $ "the following message expected: " ++ s ++ " instead of pure"
-        coeval_ lift_ (k ()) (pure x)
+        coeval_  (k ()) (pure x)
 
     (Message s :>>= k, Message' s' :>>= k')
         | s == s' -> do
             tell_ ("message: " ++ s)
-            coeval_ lift_ (k ()) (k' ())
+            coeval_  (k ()) (k' ())
         | otherwise -> do
             fail' $ "the following message expected: " ++ s ++ " instead of " ++ s'
-            coeval__ lift_ op $ k' ()
+            coeval__  op $ k' ()
 
     (Message s :>>= _, Send _i s' :>>= k') -> do
         fail' $ "the following message expected: " ++ s ++ " instead of send " ++ show s'
-        coeval__ lift_ op (k' ())
+        coeval__  op (k' ())
 
     (SetStatus i status :>>= k, _) -> do
         listeners %= case status of
@@ -204,26 +202,26 @@ coeval__ lift_ op p = do
             Unblock -> map f where
                 f (Listener i' c Block x) | i' == i = Listener i c Unblock x
                 f x = x
-        coeval_ lift_ (k ()) p
+        coeval_  (k ()) p
 
     (Listen i lr :>>= k, _) -> do
         co <- use idcounter
         listeners %= (Listener (Id co) i Unblock lr :)
         idcounter %= (+1)
-        coeval_ lift_ (k $ Id co) p
+        coeval_  (k $ Id co) p
 
     (ReadI :>>= k, _) | not nopostponed -> do
         x <- use $ postponed . to head
         postponed %= tail
-        coeval_ lift_ (k x) p
+        coeval_  (k x) p
 
     (WriteI x :>>= k, _) -> do
         postponed %= (++[x])
-        coeval_ lift_ (k ()) p
+        coeval_  (k ()) p
 
     (NewId :>>= k, _) -> do
         i <- zoom (vars . _1) $ state $ \c -> (c, succ c)
-        coeval_ lift_ (k i) p
+        coeval_  (k i) p
 
     (NewRef a :>>= k, _) -> do
         n <- use $ vars . _2 . to Seq.length
@@ -238,7 +236,7 @@ coeval__ lift_ op p = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        coeval_ lift_ (k $ SRefProg $ ff a) p
+        coeval_  (k $ SRefProg $ ff a) p
 
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s
@@ -246,13 +244,13 @@ coeval__ lift_ op p = do
           then do
             fail' $ "early send of " ++ show s
           else do
-            li' <- use $ listeners . to (\li -> [lift_ $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
+            li' <- use $ listeners . to (\li -> [lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
             if (null li')
               then do
                 fail' $ "message is not received: " ++ show i ++ " " ++ show s
               else do
                 postponed %= (++ li')
-        coeval__ lift_ op (k ())
+        coeval__  op (k ())
 
     (ReadI :>>= _, _) | nopostponed -> pure (Nothing, p)
 
@@ -262,24 +260,22 @@ type Er' = Writer [Either (Either String String) String] --ErrorT String (Writer
 
 
 eval_ :: forall a
-     . (Prog () -> Prog ())
-    -> Prog a
+     . Prog a
     -> StateT (ST) Er' (Either a (Prog () -> Prog a))
-eval_ lift_ q = do
+eval_  q = do
     op <- zoom vars $ mapStateT lift $ viewT q
-    eval__ lift_ op
+    eval__  op
 
 eval__ :: forall a
-     . (Prog () -> Prog ())
-    -> ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
+     . ProgramViewT (Inst) (State (Int, Seq.Seq Any)) a
     -> StateT (ST) Er' (Either a (Prog () -> Prog a))
-eval__ lift_ op = do
+eval__  op = do
   nopostponed <- use $ postponed . to null
   case op of
 
     Message s :>>= k -> do
         tell_ ("message: " ++ s)
-        eval_ lift_ (k ())
+        eval_  (k ())
 
     SetStatus i status :>>= k -> do
         listeners %= case status of
@@ -290,26 +286,26 @@ eval__ lift_ op = do
             Unblock -> map f where
                 f (Listener i' c Block x) | i' == i = Listener i c Unblock x
                 f x = x
-        eval_ lift_ (k ())
+        eval_  (k ())
 
     Listen i lr :>>= k -> do
         co <- use idcounter
         listeners %= (Listener (Id co) i Unblock lr :)
         idcounter %= (+1)
-        eval_ lift_ (k $ Id co)
+        eval_  (k $ Id co)
 
     ReadI :>>= k | not nopostponed -> do
         x <- use $ postponed . to head
         postponed %= tail
-        eval_ lift_ (k x)
+        eval_  (k x)
 
     WriteI x :>>= k -> do
         postponed %= (++[x])
-        eval_ lift_ (k ())
+        eval_  (k ())
 
     NewId :>>= k -> do
         i <- zoom (vars . _1) $ state $ \c -> (c, succ c)
-        eval_ lift_ (k i)
+        eval_  (k i)
 
     NewRef a :>>= k -> do
         n <- use $ vars . _2 . to Seq.length
@@ -324,7 +320,7 @@ eval__ lift_ op = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        eval_ lift_ (k $ SRefProg $ ff a)
+        eval_  (k $ SRefProg $ ff a)
 {-
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s
@@ -332,31 +328,29 @@ eval__ lift_ op = do
           then do
             fail' $ "early send of " ++ show s
           else do
-            li' <- use $ listeners . to (\li -> [lift_ $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
+            li' <- use $ listeners . to (\li -> [ $ lr $ unsafeCoerce s | Listener _ (Port pi') Unblock lr <- li, pi == pi'])
             if (null li')
               then do
                 fail' $ "message is not received: " ++ show i ++ " " ++ show s
               else do
                 postponed %= (++ li')
-        coeval__ lift_ op (k ())
+        coeval__  op (k ())
 -}
     ReadI :>>= q | nopostponed -> pure $ Right q
 
     Return x -> pure $ Left x
 
 
-runTest_ :: (Eq a, Show a, m ~ Prog)
+runTest_ :: (Eq a, Show a, MonadRegister tm, EffectM tm ~ Prog)
     => String
-    -> (Prog () -> Prog ())
-    -> (m (Prog ()) -> (Prog () -> m ()) -> tm a -> m (a, m ()))
     -> tm a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest_ name lift runRegister_ r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
-    (Just (a1,c),pe) <- coeval_ lift (runRegister_ (singleton ReadI) (singleton . WriteI) r) p0
+runTest_ name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
+    (Just a1, pe) <- coeval_ (runRegister (singleton . WriteI) r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
-    (_, pr) <- coeval_ lift c p
+    (_, pr) <- coeval_ (forever $ join $ singleton ReadI) p
     getProg' pr
 
 showError [] = pure ()
