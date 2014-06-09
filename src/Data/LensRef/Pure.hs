@@ -251,7 +251,7 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
             getHandler $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
 
-    onChangeEq m f = do
+    onChangeEq_ m f = do
         r <- newReference (const False, (mempty, error "impossible #3"))
         register r True $ \it@(p, (h', _)) -> do
             a <- liftRefReader' m
@@ -262,7 +262,7 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
                 (h, b) <- getHandler $ f a
                 return ((== a), (h, b))
 
-        return $ fmap (snd . snd) $ readRef_ r
+        return $ lensMap (_2 . _2) $ pure r
 
     onChangeMemo mr f = do
         r <- newReference ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
@@ -370,6 +370,7 @@ instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
     newRef           = lift . newRef
     onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
     onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
+    onChangeEq_ r f  = ReaderT $ \st -> onChangeEq_ r $ fmap (flip runReaderT st) f
     onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
     onRegionStatusChange = lift . onRegionStatusChange
     askPostpone      = lift askPostpone

@@ -260,10 +260,12 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
         return $ fmap snd $ readRef $ pure r
 
     onChangeEq (RefReaderTPure a) f = fmap RefReaderTPure $ f a
-    onChangeEq (RefReaderT m) f = RefCreator $ \st -> do
+    onChangeEq r f = fmap readRef $ onChangeEq_ r f
+
+    onChangeEq_ m f = RefCreator $ \st -> do
         r <- newReference st (const False, (const $ pure (), error "impossible #3"))
         registerTrigger r True $ \it@(p, (h', _)) -> flip unRegister st $ do
-            a <- m True
+            a <- runRefReaderT_ True m
             if p a
               then return it
               else do
@@ -271,7 +273,7 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
                 (h, b) <- getHandler $ f a
                 return ((== a), (h, b))
 
-        return $ fmap (snd . snd) $ readRef_ r
+        return $ lensMap (_2 . _2) $ pure r
 
     onChangeMemo (RefReaderTPure a) f = fmap RefReaderTPure $ join $ f a
     onChangeMemo (RefReaderT mr) f = RefCreator $ \st' -> do

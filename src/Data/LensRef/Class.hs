@@ -192,8 +192,11 @@ class ( RefClass (BaseRef m)
 
     onChange :: RefReader m a -> (a -> m b) -> m (RefReader m b)
 
-    onChangeEq :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChangeEq_ :: Eq a => RefReader m a -> (a -> m b) -> m (Ref m b)
     -- onChangeEq r f = onChangeMemo r $ pure . f
+
+    onChangeEq :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChangeEq r f = fmap readRef $ onChangeEq_ r f
 
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
 
@@ -202,8 +205,6 @@ class ( RefClass (BaseRef m)
     askPostpone :: m (RefWriter m () -> EffectM m ())
 
     runRegister :: (EffectM m () -> EffectM m ()) -> m a -> EffectM m a
-
-
 
 -- | TODO
 class (Monad m, Applicative m) => MonadMemo m where
