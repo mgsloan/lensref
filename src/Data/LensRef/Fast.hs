@@ -236,10 +236,17 @@ instance NewRef m => RefClass (RefHandler m) where
     writeRefSimple (RefReaderT mr) a
         = RefWriterT $ mr False >>= \r -> RefCreator $ \st -> readWrite r False >>= ($ a) . (^. _2)
 
---    lensMap k (RefReaderTPure r) = 
-    lensMap k mr = RefReaderT $ \b -> RefCreator $ \st -> pure $ RefHandler
-        { readWrite = \b -> ((flip unRegister st $ runRefReaderT_ b mr) >>= \r -> readWrite r b) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
-        , registerTrigger = \init f -> joinReg st mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
+    lensMap k (RefReaderTPure r) = pure $ RefHandler
+        { readWrite = \b -> readWrite r b
+                                <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
+        , registerTrigger = \init f -> registerTrigger r init
+                                $ \a -> f (a ^. k) <&> \b -> set k b a
+        }
+    lensMap k mr = RefReaderT $ \_ -> RefCreator $ \st -> pure $ RefHandler
+        { readWrite = \b -> (flip unRegister st (runRefReaderT_ b mr) >>= flip readWrite b)
+                                <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
+        , registerTrigger = \init f -> joinReg st mr init
+                                $ \a -> f (a ^. k) <&> \b -> set k b a
         }
 
 instance NewRef m => MonadRefCreator (RefCreator m) where

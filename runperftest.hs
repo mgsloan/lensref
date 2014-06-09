@@ -30,7 +30,7 @@ main = defaultMainWith myConfig (return ())
         , let i = n `div` (corr * corr2)
         ]
   where
-    range = [1000,2000..6000]
+    range = [2000,4000,6000]
 
 -- for comparison
 ioRefTest n = do
