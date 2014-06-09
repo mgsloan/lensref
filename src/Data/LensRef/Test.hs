@@ -46,8 +46,8 @@ runTest__ = runTest
 -- | Look inside the sources for the tests.
 tests :: forall m
      . (MonadRefCreator m, EffectM m ~ Prog)
-    => (forall a . ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
-    -> (forall b . RefWriter m b -> Post m b)
+    => (forall a . ((RefWriterOf m () -> EffectM m ()) -> m a) -> EffectM m a)
+    -> (forall b . RefWriterOf m b -> Post m b)
     -> IO ()
 
 tests runRefCreator liftRefWriter' = do
@@ -747,8 +747,8 @@ tests runRefCreator liftRefWriter' = do
 
 performanceTests :: forall m
      . (MonadRefCreator m)
-    => (forall a . ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
-    -> (forall b . RefWriter m b -> m b)
+    => (forall a . ((RefWriterOf m () -> EffectM m ()) -> m a) -> EffectM m a)
+    -> (forall b . RefWriterOf m b -> m b)
     -> String
     -> Int
     -> EffectM m ()
@@ -816,8 +816,8 @@ undoTr
     :: MonadRefCreator m =>
        (a -> a -> Bool)     -- ^ equality on state
     -> Ref m a             -- ^ reference of state
-    ->   m ( RefReader m (Maybe (RefWriter m ()))
-           , RefReader m (Maybe (RefWriter m ()))
+    ->   m ( RefReaderOf m (Maybe (RefWriterOf m ()))
+           , RefReaderOf m (Maybe (RefWriterOf m ()))
            )  -- ^ undo and redo actions
 undoTr eq r = do
     ku <- extRef r (undoLens eq) ([], [])

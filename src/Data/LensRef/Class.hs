@@ -10,14 +10,14 @@ module Data.LensRef.Class
     -- * References
       RefClass (..)
     , RefSimple
-    , RefWriterOf
+    , RefWriterOf_
     , RefWriterSimple
 
     , MonadRefReader (..)
     , MonadRefWriter (..)
     , Ref
-    , RefReader
-    , RefWriter
+    , RefReaderOf
+    , RefWriterOf
 
     -- * Reference creation
     , MonadRefCreator (..)
@@ -49,7 +49,7 @@ of just @(r a)@. For more compact type signatures, @(RefReaderSimple r (r a))@ i
 -}
 class ( MonadRefReader (RefReaderSimple r)
       , MonadRefWriter (RefWriterSimple r)
-      , RefReader (RefReaderSimple r) ~ RefReaderSimple r
+      , RefReaderOf (RefReaderSimple r) ~ RefReaderSimple r
       )
     => RefClass r where
 
@@ -84,16 +84,16 @@ class ( MonadRefReader (RefReaderSimple r)
     -}
     writeRefSimple :: RefSimple r a -> a -> RefWriterSimple r ()
 
-data family RefWriterOf (m :: * -> *) :: * -> *
+data family RefWriterOf_ (m :: * -> *) :: * -> *
 
 {- |
 There are two associated types of a reference, 'RefReaderSimple' and 'RefWriterSimple' which determines each-other.
 This is implemented by putting only 'RefReaderSimple' into the 'RefClass' class and
-adding a @RefWriterOf@ data family outside of 'RefClass'.
+adding a @RefWriterOf_@ data family outside of 'RefClass'.
 
-@RefWriterOf@ is hidden from the documentation because you never need it explicitly.
+@RefWriterOf_@ is hidden from the documentation because you never need it explicitly.
 -}
-type RefWriterSimple m = RefWriterOf (RefReaderSimple m)
+type RefWriterSimple m = RefWriterOf_ (RefReaderSimple m)
 
 -- | Reference wrapped into a RefReaderSimple monad. See the documentation of 'RefClass'.
 type RefSimple r a = RefReaderSimple r (r a)
@@ -102,27 +102,27 @@ infixr 8 `lensMap`
 
 -- | TODO
 class ( Applicative m, Monad m
-      , BaseRef (RefWriter m) ~ BaseRef m
+      , BaseRef (RefWriterOf m) ~ BaseRef m
       )
     => MonadRefReader m where
 
     -- | Base reference associated to the reference reader monad
     type BaseRef m :: * -> *
 
-    liftRefReader :: RefReader m a -> m a
+    liftRefReader :: RefReaderOf m a -> m a
 
     {- | @readRef@ === @liftRefReader . readRefSimple@
     -}
     {-# INLINE readRef #-}
-    readRef :: (RefClass r, RefReader m ~ RefReaderSimple r) => RefSimple r a -> m a
+    readRef :: (RefClass r, RefReaderOf m ~ RefReaderSimple r) => RefSimple r a -> m a
     readRef = liftRefReader . readRefSimple
 
 
 -- | TODO
-type RefReader m = RefReaderSimple (BaseRef m)
+type RefReaderOf m = RefReaderSimple (BaseRef m)
 
 -- | TODO
-type RefWriter m = RefWriterSimple (BaseRef m)
+type RefWriterOf m = RefWriterSimple (BaseRef m)
 
 -- | TODO
 type Ref m a = RefSimple (BaseRef m) a
@@ -134,17 +134,17 @@ class ( MonadRefReader m
       )
     => MonadRefWriter m where
 
-    liftRefWriter :: RefWriter m a -> m a
+    liftRefWriter :: RefWriterOf m a -> m a
 
     {- | @writeRef r@ === @liftRefWriter . writeRefSimple r@
     -}
     {-# INLINE writeRef #-}
-    writeRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> a -> m ()
+    writeRef :: (RefClass r, RefReaderSimple r ~ RefReaderOf m) => RefSimple r a -> a -> m ()
     writeRef r = liftRefWriter . writeRefSimple r
 
     -- | @modRef r f@ === @readRef r >>= writeRef r . f@
     {-# INLINE modRef #-}
-    modRef :: (RefClass r, RefReaderSimple r ~ RefReader m) => RefSimple r a -> (a -> a) -> m ()
+    modRef :: (RefClass r, RefReaderSimple r ~ RefReaderOf m) => RefSimple r a -> (a -> a) -> m ()
     r `modRef` f = readRef r >>= writeRef r . f
 
 
@@ -160,8 +160,8 @@ class ( RefClass (BaseRef m)
       , MonadRefReader m
       , MonadMemo m
       , MonadEffect m
-      , MonadEffect (RefWriter m)
-      , EffectM (RefWriter m) ~ EffectM m
+      , MonadEffect (RefWriterOf m)
+      , EffectM (RefWriterOf m) ~ EffectM m
       )
     => MonadRefCreator m where
 
@@ -191,15 +191,15 @@ class ( RefClass (BaseRef m)
     newRef :: a -> m (Ref m a)
     --newRef = extRef unitRef united
 
-    onChange :: RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChange :: RefReaderOf m a -> (a -> m b) -> m (RefReaderOf m b)
 
-    onChangeEq_ :: Eq a => RefReader m a -> (a -> m b) -> m (Ref m b)
+    onChangeEq_ :: Eq a => RefReaderOf m a -> (a -> m b) -> m (Ref m b)
     -- onChangeEq r f = onChangeMemo r $ pure . f
 
-    onChangeEq :: Eq a => RefReader m a -> (a -> m b) -> m (RefReader m b)
+    onChangeEq :: Eq a => RefReaderOf m a -> (a -> m b) -> m (RefReaderOf m b)
     onChangeEq r f = fmap readRef $ onChangeEq_ r f
 
-    onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
+    onChangeMemo :: Eq a => RefReaderOf m a -> (a -> m (m b)) -> m (RefReaderOf m b)
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
@@ -225,7 +225,7 @@ class (Monad m, Applicative m) => MonadMemo m where
 {-
     memoWrite :: Eq b => (b -> m a) -> m (b -> m a)
 
-    future :: (RefReader m a -> m a) -> m a
+    future :: (RefReaderOf m a -> m a) -> m a
 -}
 
 -- | TODO

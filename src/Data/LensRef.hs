@@ -15,8 +15,8 @@ module Data.LensRef
     , MonadRefReader (..)
     , MonadRefWriter (..)
     , Ref
-    , RefReader
-    , RefWriter
+    , RefReaderOf
+    , RefWriterOf
 
     -- ** Reference creation
     , MonadRefCreator (..)

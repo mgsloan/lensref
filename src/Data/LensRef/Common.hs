@@ -80,7 +80,7 @@ instance NewRef IO where
 
     future = future_
 
-future_ :: (MonadRefCreator m, MonadRefWriter m) => (RefReader m a -> m a) -> m a
+future_ :: (MonadRefCreator m, MonadRefWriter m) => (RefReaderOf m a -> m a) -> m a
 future_ f = do
     s <- newRef $ error "can't see the future"
     a <- f $ readRef s
