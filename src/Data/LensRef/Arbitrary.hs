@@ -52,13 +52,13 @@ instance Arbitrary (ARegister (ARefReader Bool)) where
         , liftA2 (\r f -> singleton $ OnChange (r :: ARefReader Bool) f) arbitrary arbitrary
         ]
 
-toPure :: ARegister a -> Pure.Register Identity a
+toPure :: ARegister a -> Pure.RefCreator Identity a
 toPure = undefined
 
-toFast :: ARegister a -> Fast.Register Identity a
+toFast :: ARegister a -> Fast.RefCreator Identity a
 toFast = undefined
 
-similar :: Pure.Register Identity a -> Fast.Register Identity a -> Bool
+similar :: Pure.RefCreator Identity a -> Fast.RefCreator Identity a -> Bool
 similar = undefined
 
 prop :: ARegister () -> Bool

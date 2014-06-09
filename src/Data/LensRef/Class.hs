@@ -21,17 +21,12 @@ module Data.LensRef.Class
 
     -- * Reference creation
     , MonadRefCreator (..)
-
-    -- * Effects
-    , MonadEffect (..)
-
-    -- * Dynamic networks
-    , MonadRegister (..)
     , RegionStatusChange (..)
     , RegionStatusChangeHandler
 
     -- * Other
     , MonadMemo (..)
+    , MonadEffect (..)
     ) where
 
 
@@ -193,7 +188,7 @@ class ( RefClass (BaseRef m)
     @newRef@ === @extRef unitRef united@
     -}
     newRef :: a -> m (Ref m a)
-    newRef = extRef unitRef united
+    --newRef = extRef unitRef united
 
     onChange :: RefReader m a -> (a -> m b) -> m (RefReader m b)
 
@@ -203,6 +198,10 @@ class ( RefClass (BaseRef m)
     onChangeMemo :: Eq a => RefReader m a -> (a -> m (m b)) -> m (RefReader m b)
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
+
+    askPostpone :: m (RefWriter m () -> EffectM m ())
+
+    runRegister :: (EffectM m () -> EffectM m ()) -> m a -> EffectM m a
 
 
 
@@ -240,26 +239,6 @@ class ( Monad m, Applicative m
 
     liftEffectM :: EffectM m a -> m a
 
-{-
-class ( MonadRefCreator m
-      )
-    => MonadUpdate m where
-
-    -- onUpdate
-    accRef :: RefReader m a -> b -> (a -> b -> m b) -> m (Ref m b, Handle m)
-
-    extRef :: Ref m b -> Lens' a b -> a -> m (Ref m a)
-
-        -- handle:  block, unblock, kill, perform
--}
-
-
--- | TODO
-class MonadRefCreator m => MonadRegister m where        -- MonadPostpone
-
-    askPostpone :: m (RefWriter m () -> EffectM m ())
-
-    runRegister :: (EffectM m () -> EffectM m ()) -> m a -> EffectM m a
 
 -- | TODO
 data RegionStatusChange = Kill | Block | Unblock deriving (Eq, Ord, Show)

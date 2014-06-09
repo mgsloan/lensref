@@ -20,18 +20,12 @@ module Data.LensRef
 
     -- ** Reference creation
     , MonadRefCreator (..)
-
-    -- ** Dynamic networks
-    , MonadRegister
     , onChangeEq
     , onChangeMemo
+    , postponeModification
 
     -- ** Other
     , MonadMemo (..)
-
-    -- * Derived constructs
-    , postponeModification
---    , undoTr
 
     , EqRefClass        --EqRefClass (..)
             , hasEffect
@@ -57,7 +51,7 @@ import Data.LensRef.Class
 
 
 -- | TODO
-postponeModification :: MonadRegister m => RefWriter m () -> m ()
+postponeModification :: MonadRefCreator m => RefWriter m () -> m ()
 postponeModification m = askPostpone >>= liftEffectM . ($ m)
 
 

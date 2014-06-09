@@ -44,7 +44,7 @@ runTest__ = runTest
 
 -- | Look inside the sources for the tests.
 tests :: forall m
-     . (MonadRegister m, EffectM m ~ Prog)
+     . (MonadRefCreator m, EffectM m ~ Prog)
     => (forall b . RefWriter m b -> m b)
     -> IO ()
 
@@ -764,7 +764,7 @@ tests liftRefWriter' = do
     return ()
 
 performanceTests :: forall m
-     . (MonadRegister m)
+     . (MonadRefCreator m)
     => (forall b . RefWriter m b -> m b)
     -> Int
     -> EffectM m ()
@@ -831,7 +831,7 @@ maybeLens = lens (\(b,a) -> if b then Just a else Nothing)
 
 -- | Undo-redo state transformation.
 undoTr
-    :: MonadRegister m =>
+    :: MonadRefCreator m =>
        (a -> a -> Bool)     -- ^ equality on state
     -> Ref m a             -- ^ reference of state
     ->   m ( RefReader m (Maybe (RefWriter m ()))
