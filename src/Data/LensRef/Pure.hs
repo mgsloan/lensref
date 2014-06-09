@@ -361,29 +361,6 @@ instance (Monad m, Applicative m) => MonadEffect (RefCreator m) where
 
 -------------
 
-instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
-    type BaseRef (ReaderT w m) = BaseRef m
-    liftRefReader = lift . liftRefReader
-
-instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
-    extRef r l       = lift . extRef r l
-    newRef           = lift . newRef
-    onChange r f     = ReaderT $ \st -> onChange r $ fmap (flip runReaderT st) f
-    onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
-    onChangeEq_ r f  = ReaderT $ \st -> onChangeEq_ r $ fmap (flip runReaderT st) f
-    onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
-    onRegionStatusChange = lift . onRegionStatusChange
-    askPostpone      = lift askPostpone
---    runRegister      = lift . runRegister     -- !!! can't lift
-
-instance (MonadMemo m) => MonadMemo (ReaderT w m) where
-    memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
-
-instance (MonadEffect m) => MonadEffect (ReaderT w m) where
-    type EffectM (ReaderT w m) = EffectM m
-    liftEffectM = lift . liftEffectM
-
-
 -------------------------- aux
 
 -- | topological sorting on component
