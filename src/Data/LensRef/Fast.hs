@@ -53,11 +53,11 @@ data TriggerState m = TriggerState
 -- | reference handler
 data RefHandler m a = RefHandler
     { readWrite           -- ^ reader and writer actions
-        :: !(RefReaderT m (a, a -> m ()))
+        :: !(Bool -> m (a, a -> m ()))
     , registerTrigger     -- ^ how to registerTrigger a trigger
         :: Bool           -- ^ True: run the trigger initially also
         -> (a -> m a)     -- ^ trigger to be registered
-        -> Register m ()
+        -> m ()
     }
 
 -- | global variables
@@ -107,13 +107,13 @@ type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 
 ------------------------------
 
-{-# SPECIALIZE newReference :: a -> Register IO (RefHandler IO a) #-}
-newReference :: forall m a . NewRef m => a -> Register m (RefHandler m a)
-newReference a = Register $ \st -> do
+{-# SPECIALIZE newReference :: GlobalVars IO -> a -> IO (RefHandler IO a) #-}
+newReference :: forall m a . NewRef m => GlobalVars m -> a -> m (RefHandler m a)
+newReference st a = do
     ir@(OrdRef i oir) <- newOrdRef st $ RefState a mempty
 
     return RefHandler
-        { readWrite = RefReaderT $ \b -> Register $ \st -> do
+        { readWrite = \b -> do
 
             RefState a nas <- readRef' oir
             when b $ modRef' (_dependencycoll st) $ modify $ Map.insert i oir
@@ -153,7 +153,7 @@ newReference a = Register $ \st -> do
                     mapM_ collects as
                     topSort as
 
-        , registerTrigger = \init upd -> Register $ \st -> do
+        , registerTrigger = \init upd -> do
 
             let gv = do
                     writeRef' (_dependencycoll st) mempty
@@ -199,71 +199,69 @@ newReference a = Register $ \st -> do
                     _postpone st x
         }
 
-{-# SPECIALIZE joinReg :: RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> Register IO () #-}
-joinReg :: NewRef m => RefReaderT m (RefHandler m a) -> Bool -> (a -> m a) -> Register m ()
-joinReg (RefReaderTPure r) init a = registerTrigger r init a
-joinReg (RefReaderT m) init a = do
-    st <- ask
-    r <- newReference mempty
+{-# SPECIALIZE joinReg :: GlobalVars IO -> RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> IO () #-}
+joinReg :: NewRef m => GlobalVars m -> RefReaderT m (RefHandler m a) -> Bool -> (a -> m a) -> m ()
+joinReg _ (RefReaderTPure r) init a = registerTrigger r init a
+joinReg st (RefReaderT m) init a = do
+    r <- newReference st mempty
     registerTrigger r True $ \kill -> flip unRegister st $ do
         runM kill Kill
         ref <- m True
-        fmap fst $ getHandler $ registerTrigger ref init a
-    tellHand $ \msg -> MonadMonoid $ flip unRegister st $ do
-        h <- runRefReaderT_ True $ readRef_ r
-        runM h msg
+        fmap fst $ getHandler $ Register $ \_ -> registerTrigger ref init a
+    flip unRegister st $ tellHand $ \msg -> MonadMonoid $ do
+        h <- flip unRegister st $ runRefReaderT_ True $ readRef_ r
+        flip unRegister st $ runM h msg
 
 instance NewRef m => RefClass (RefHandler m) where
     {-# SPECIALIZE instance RefClass (RefHandler IO) #-}
     type RefReaderSimple (RefHandler m) = RefReaderT m
 
     unitRef = pure $ RefHandler
-        { readWrite = pure ((), const $ pure ())
+        { readWrite = \_ -> pure ((), const $ pure ())
         , registerTrigger  = const $ const $ pure ()
         }
 
     {-# INLINE readRefSimple #-}
-    readRefSimple (RefReaderTPure r) = readRef_ r
+    readRefSimple (RefReaderTPure r) = RefReaderT $ \b -> Register $ \st -> readWrite r b <&> fst
     readRefSimple (RefReaderT m) = RefReaderT $ \b -> m b >>= runRefReaderT_ b . readRef_
 
 --    {-# INLINE writeRefSimple #-}
     writeRefSimple (RefReaderTPure r) a
-        = RefWriterT $ runRefReaderT_ False (readWrite r) >>= Register . const . ($ a) . (^. _2)
+        = RefWriterT $ Register $ \st -> readWrite r False >>= ($ a) . (^. _2)
     writeRefSimple (RefReaderT mr) a
-        = RefWriterT $ mr False >>= runRefReaderT_ False . readWrite >>= Register . const . ($ a) . (^. _2)
+        = RefWriterT $ mr False >>= \r -> Register $ \st -> readWrite r False >>= ($ a) . (^. _2)
 
-    lensMap k mr = pure $ RefHandler
-        { readWrite = (mr >>= readWrite) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
-        , registerTrigger = \init f -> joinReg mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
+--    lensMap k (RefReaderTPure r) = 
+    lensMap k mr = RefReaderT $ \b -> Register $ \st -> pure $ RefHandler
+        { readWrite = \b -> ((flip unRegister st $ runRefReaderT_ b mr) >>= \r -> readWrite r b) <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
+        , registerTrigger = \init f -> joinReg st mr init $ \a -> fmap (\b -> set k b a) $ f (a ^. k)
         }
 
 instance NewRef m => MonadRefCreator (Register m) where
     {-# SPECIALIZE instance MonadRefCreator (Register IO) #-}
 
-    newRef = fmap pure . newReference
+    newRef a = Register $ \st -> fmap pure $ newReference st a
 
     extRef m k a0 = do
         st <- ask
-        r <- newReference a0
+        r <- Register $ \st -> newReference st a0
         -- TODO: remove dropHandler?
-        dropHandler $ do
-            joinReg m False $ \_ -> flip unRegister st $ runRefReaderT_ True $ fmap (^. k) $ readRef_ r
+        dropHandler $ Register $ \st -> do
+            joinReg st m False $ \_ -> flip unRegister st $ runRefReaderT_ True $ fmap (^. k) $ readRef_ r
             registerTrigger r True $ \a -> flip unRegister st $ runRefReaderT_ True $ fmap (\b -> set k b a) $ readRefSimple m
         return $ pure r
 
     onChange (RefReaderTPure a) f = fmap RefReaderTPure $ f a
-    onChange m f = do
-        st <- ask
-        r <- newReference (mempty, error "impossible #4")
+    onChange m f = Register $ \st -> do
+        r <- newReference st (mempty, error "impossible #4")
         registerTrigger r True $ \(h, _) -> flip unRegister st $ do
             runM h Kill
             getHandler $ liftRefReader m >>= f
         return $ fmap snd $ readRef $ pure r
 
     onChangeEq (RefReaderTPure a) f = fmap RefReaderTPure $ f a
-    onChangeEq (RefReaderT m) f = do
-        st <- ask
-        r <- newReference (const False, (mempty, error "impossible #3"))
+    onChangeEq (RefReaderT m) f = Register $ \st -> do
+        r <- newReference st (const False, (mempty, error "impossible #3"))
         registerTrigger r True $ \it@(p, (h', _)) -> flip unRegister st $ do
             a <- m True
             if p a
@@ -276,9 +274,8 @@ instance NewRef m => MonadRefCreator (Register m) where
         return $ fmap (snd . snd) $ readRef_ r
 
     onChangeMemo (RefReaderTPure a) f = fmap RefReaderTPure $ join $ f a
-    onChangeMemo (RefReaderT mr) f = do
-        st' <- ask
-        r <- newReference ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
+    onChangeMemo (RefReaderT mr) f = Register $ \st' -> do
+        r <- newReference st' ((const False, ((error "impossible #2", mempty, mempty) , error "impossible #1")), [])
         registerTrigger r True $ \st@((p, ((m'',h1'',h2''), _)), memo) -> flip unRegister st' $ do
             let it = (p, (m'', h1''))
             a <- mr True
@@ -306,7 +303,7 @@ instance NewRef m => MonadRefCreator (Register m) where
 
 {-# INLINE readRef_ #-}
 readRef_ :: NewRef m => RefHandler m a -> RefReaderT m a
-readRef_ r = readWrite r <&> fst
+readRef_ r = RefReaderT $ \b -> Register $ \st -> readWrite r b <&> fst
 
 {-# INLINE ask #-}
 ask :: Monad m => Register m (GlobalVars m)
