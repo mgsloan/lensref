@@ -300,14 +300,12 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = tellHand h
 
-    askPostpone = RefCreator $ \st -> do
-        return $ _postpone st . flip unRegister st . runRefWriterT
-
-    runRegister write m = do
+    refCreatorRunner write f = do
         a <- newRef' $ const $ pure ()
         b <- newRef' mempty
         c <- newRef' 0
-        unRegister m $ GlobalVars a b write c
+        let s = GlobalVars a b write c
+        unRegister (f $ flip unRegister s . runRefWriterT) s
 
 -------------------- aux
 

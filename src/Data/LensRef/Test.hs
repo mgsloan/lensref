@@ -17,6 +17,7 @@ import Data.Maybe
 import Data.IORef
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Trans
 import Control.Arrow ((***))
 import Control.Lens.Simple
 
@@ -29,13 +30,13 @@ import Data.LensRef.Pure as Pure
 -----------------------------------------------------------------
 
 runTests :: IO ()
-runTests = tests Fast.liftRefWriter'
+runTests = tests (lift . Fast.liftRefWriter')
 
 runPerformanceTests :: Int -> IO ()
 runPerformanceTests = performanceTests Fast.liftRefWriter'
 
 runTestsPure :: IO ()
-runTestsPure = tests Pure.liftRefWriter'
+runTestsPure = tests (lift . Pure.liftRefWriter')
 
 runPerformanceTestsPure :: Int -> IO ()
 runPerformanceTestsPure = performanceTests Pure.liftRefWriter'
@@ -45,15 +46,15 @@ runTest__ = runTest
 -- | Look inside the sources for the tests.
 tests :: forall m
      . (MonadRefCreator m, EffectM m ~ Prog)
-    => (forall b . RefWriter m b -> m b)
+    => (forall b . RefWriter m b -> Post m b)
     -> IO ()
 
 tests liftRefWriter' = do
 
-    let runTest :: (Eq a, Show a) => String -> m a -> Prog' (a, Prog' ()) -> IO ()
+    let runTest :: (Eq a, Show a) => String -> Post m a -> Prog' (a, Prog' ()) -> IO ()
         runTest = runTest__
 
-    let writeRef' :: Ref m c -> c -> m ()
+    let writeRef' :: Ref m c -> c -> Post m ()
         writeRef' r = liftRefWriter' . writeRefSimple r
 
     let runTestSimple name t = runTest name t $ pure ((), pure ())

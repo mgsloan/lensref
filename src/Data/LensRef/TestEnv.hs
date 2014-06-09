@@ -13,7 +13,8 @@ module Data.LensRef.TestEnv where
 
 import Control.Applicative
 import Control.Monad.State
-import Control.Monad.Writer hiding (listen, Any)
+import Control.Monad.Reader
+import Control.Monad.Writer hiding (Any)
 import Control.Monad.Operational
 import Control.Monad.Identity
 import qualified Data.Sequence as Seq
@@ -76,14 +77,17 @@ infix 0 ==?
 --(==?) :: (Eq a, Show a, MonadRefCreator m, EffectM m ~ Prog, MonadRefCreator (RefWriter m)) => a -> a -> m ()
 rv ==? v = when (rv /= v) $ message $ "runTest failed: " ++ show rv ++ " /= " ++ show v
 
+setStatus id s = singleton $ SetStatus id s
 
-listen :: (MonadRefCreator m, EffectM m ~ Prog, Show a) => Port a -> (a -> RefWriter m ()) -> m ()
+listen' p f = singleton $ Listen p f
+
+listen :: (MonadRefCreator m, EffectM m ~ Prog, Show a) => Port a -> (a -> RefWriter m ()) -> Post m ()
 listen i m = do
-    post <- askPostpone
-    id <- liftEffectM . singleton $ Listen i $ post . m
+    post <- ask
+    id <- liftEffectM $ listen' i $ post . m
     message $ "listener " ++ show id
     onRegionStatusChange $ \s -> do
-        liftEffectM $ singleton $ SetStatus id s
+        liftEffectM $ setStatus id s
         when (s == Kill) $ message $ show s ++ " " ++ show id
 
 
@@ -346,14 +350,15 @@ eval__  op = do
 
     Return x -> pure $ Left x
 
+type Post m = ReaderT (RefWriter m () -> EffectM m ()) m
 
 runTest :: (Eq a, Show a, MonadRefCreator m, EffectM m ~ Prog)
     => String
-    -> m a
+    -> Post m a
     -> Prog' (a, Prog' ())
     -> IO ()
 runTest name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
-    (Just a1, pe) <- coeval_ (runRegister (singleton . WriteI) r) p0
+    (Just a1, pe) <- coeval_ (refCreatorRunner (singleton . WriteI) $ \p -> runReaderT r p) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
     (_, pr) <- coeval_ (forever $ join $ singleton ReadI) p

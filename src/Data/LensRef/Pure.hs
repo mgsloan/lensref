@@ -290,13 +290,12 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = RefCreator $ tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
-    askPostpone = RefCreator ask
-
-    runRegister write m = do
+    refCreatorRunner write f = do
         r <- newRef' mempty
         let run = modRef' r
         let run' = modRef' r
-        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) . unRefCreator $ m
+        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) . unRefCreator $ f $ run . runRefWriterT
+
 
 ----------------------------------- aux
 
@@ -358,8 +357,6 @@ instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) wh
 instance (Monad m, Applicative m) => MonadEffect (RefCreator m) where
     type EffectM (RefCreator m) = m
     liftEffectM = RefCreator . lift . lift . lift
-
--------------
 
 -------------------------- aux
 
