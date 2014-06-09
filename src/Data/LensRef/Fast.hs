@@ -65,7 +65,7 @@ data RefHandler m a = RefHandler
 data GlobalVars m = GlobalVars
     { _handlercollection  :: !(SRef m (Handler m))  -- ^ collected handlers
     , _dependencycoll     :: !(SRef m (Ids m))      -- ^ collected dependencies
-    , _postpone           :: !(m () -> m ())        -- ^ postpone action
+    , _postpone           :: !(SRef m (m ()))       -- ^ postponed actions
     , _counter            :: !(SRef m Int)          -- ^ increasing counter
     }
 
@@ -153,6 +153,10 @@ newReference st a = do
                     mapM_ collects as
                     topSort as
 
+                    p <- readRef' (_postpone st)
+                    writeRef' (_postpone st) $ return ()
+                    p
+
         , registerTrigger = \init upd -> do
 
             let gv = do
@@ -196,7 +200,7 @@ newReference st a = do
                 -- TODO
                 when (msg == Unblock) $ do
                     TriggerState _ _ _ x _ <- readRef' ori
-                    _postpone st x
+                    modRef' (_postpone st) $ modify (>> x)
         }
 
 {-# SPECIALIZE joinReg :: GlobalVars IO -> RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> IO () #-}
@@ -303,8 +307,9 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
     refCreatorRunner write f = do
         a <- newRef' $ const $ pure ()
         b <- newRef' mempty
-        c <- newRef' 0
-        let s = GlobalVars a b write c
+        c <- newRef' $ return ()
+        d <- newRef' 0
+        let s = GlobalVars a b c d
         unRegister (f $ flip unRegister s . runRefWriterT) s
 
 -------------------- aux
