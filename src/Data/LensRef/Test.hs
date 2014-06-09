@@ -32,13 +32,13 @@ import Data.LensRef.Pure as Pure
 runTests :: IO ()
 runTests = tests Fast.runRefCreator (lift . Fast.liftRefWriter')
 
-runPerformanceTests :: Int -> IO ()
+runPerformanceTests :: String -> Int -> IO ()
 runPerformanceTests = performanceTests Fast.runRefCreator Fast.liftRefWriter'
 
 runTestsPure :: IO ()
 runTestsPure = tests Pure.runRefCreator (lift . Pure.liftRefWriter')
 
-runPerformanceTestsPure :: Int -> IO ()
+runPerformanceTestsPure :: String -> Int -> IO ()
 runPerformanceTestsPure = performanceTests Pure.runRefCreator Pure.liftRefWriter'
 
 runTest__ = runTest
@@ -749,15 +749,13 @@ performanceTests :: forall m
      . (MonadRefCreator m)
     => (forall a . ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
     -> (forall b . RefWriter m b -> m b)
+    -> String
     -> Int
     -> EffectM m ()
 
-performanceTests runRefCreator liftRefWriter' n = do
+performanceTests runRefCreator liftRefWriter' name n = do
 
-    let
-        runTest name m = runRefCreator $ const m
-
-        a ==? b | a == b = return ()
+    let a ==? b | a == b = return ()
         a ==? b = fail $ show a ++ " /= " ++ show b
 
     let writeRef' :: Ref m c -> c -> m ()
@@ -765,46 +763,47 @@ performanceTests runRefCreator liftRefWriter' n = do
 
     let r ==> v = readRef r >>= (==? v)
 
-    runTest "separate refs" $ do    -- 1.68
-        rs <- replicateM n $ newRef 'x'         -- 0.57
-        forM_ rs $ \r -> r ==> 'x'              -- 0.25
-        forM_ rs $ \r -> writeRef' r 'y'        -- 0.61
-        forM_ rs $ \r -> r ==> 'y'
-        return ()
-{-
-    runTest "lensMap chain" $ do
-        r <- newRef 'x'
-        let q = iterate (lensMap id) r !! n
-        q ==> 'x'
-        writeRef' q 'y'
-        q ==> 'y'
+    runRefCreator $ const $ case name of
+        "create" -> do
+            rs <- replicateM n $ newRef 'x'
+            forM_ rs $ \r -> r ==> 'x'
+            forM_ rs $ \r -> writeRef' r 'y'
+            forM_ rs $ \r -> r ==> 'y'
+            return ()
 
-    runTest "join chain" $ do
-        rb <- newRef True
-        r1 <- newRef 'x'
-        r2 <- newRef 'y'
-        let f (r1, r2) = (r1', r2') where
-                r1' = join $ readRef rb <&> \b -> if b then r1 else r2
-                r2' = join $ readRef rb <&> \b -> if b then r2 else r1
-            (r1', r2') = iterate f (r1, r2) !! (2*n)
-        r1' ==> 'x'
-        r2' ==> 'y'
-        writeRef' r1' 'X'
-        r1' ==> 'X'
-        r2' ==> 'y'
-        writeRef' r2' 'Y'
-        r1' ==> 'X'
-        r2' ==> 'Y'
-        writeRef' rb False
-        r1' ==> 'X'
-        r2' ==> 'Y'
-        writeRef' r1' 'x'
-        r1' ==> 'x'
-        r2' ==> 'Y'
-        writeRef' r2' 'y'
-        r1' ==> 'x'
-        r2' ==> 'y'
--}
+        "mapchain" -> do
+            r <- newRef 'x'
+            let q = iterate (lensMap id) r !! n
+            q ==> 'x'
+            writeRef' q 'y'
+            q ==> 'y'
+
+        "joinchain" -> do
+            rb <- newRef True
+            r1 <- newRef 'x'
+            r2 <- newRef 'y'
+            let f (r1, r2) = (r1', r2') where
+                    r1' = join $ readRef rb <&> \b -> if b then r1 else r2
+                    r2' = join $ readRef rb <&> \b -> if b then r2 else r1
+                (r1', r2') = iterate f (r1, r2) !! (2*n)
+            r1' ==> 'x'
+            r2' ==> 'y'
+            writeRef' r1' 'X'
+            r1' ==> 'X'
+            r2' ==> 'y'
+            writeRef' r2' 'Y'
+            r1' ==> 'X'
+            r2' ==> 'Y'
+            writeRef' rb False
+            r1' ==> 'X'
+            r2' ==> 'Y'
+            writeRef' r1' 'x'
+            r1' ==> 'x'
+            r2' ==> 'Y'
+            writeRef' r2' 'y'
+            r1' ==> 'x'
+            r2' ==> 'y'
+
 
 -------------------------- auxiliary definitions
 

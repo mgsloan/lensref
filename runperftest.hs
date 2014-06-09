@@ -20,13 +20,17 @@ myConfig = defaultConfig
             , cfgReport    = ljust "lensref-performance-report.html"
             }
 
-main = defaultMainWith myConfig (return ()) $
-    [ bench ("ioref " ++ show i) $ ioRefTest i | i <- range]
- ++ [ bench ("lensref fast " ++ show i) $ runPerformanceTests i | i <- map (`div` 10) $ range]
- ++ [ bench ("lensref pure " ++ show i) $ runPerformanceTestsPure i | i <- map (`div` 100) $ range]
+main = defaultMainWith myConfig (return ())
+     $  [ bench ("ioref " ++ show i) $ ioRefTest i | i <- map (* 10) range]
+     ++
+        [ bench (imp ++ " " ++ name ++ " " ++ show i) $ f name i
+        | (imp, f, corr) <- [("fast", runPerformanceTests, 1), ("pure", runPerformanceTestsPure, 10)]
+        , (name, corr2) <- [("create", 1), ("mapchain", 1), ("joinchain", 2)]
+        , n <- range
+        , let i = n `div` (corr * corr2)
+        ]
   where
---    range = takeWhile (<50000) [2^n | n <- [4..]]
-    range = [1000,2000..9000] ++ [10000,20000..60000]
+    range = [1000,2000..6000]
 
 -- for comparison
 ioRefTest n = do
@@ -40,3 +44,4 @@ ioRefTest n = do
     a ==? b | a == b = return ()
     a ==? b = fail $ show a ++ " /= " ++ show b
 #endif
+
