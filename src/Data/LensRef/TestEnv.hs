@@ -353,12 +353,13 @@ eval__  op = do
 type Post m = ReaderT (RefWriter m () -> EffectM m ()) m
 
 runTest :: (Eq a, Show a, MonadRefCreator m, EffectM m ~ Prog)
-    => String
+    => (((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
+    -> String
     -> Post m a
     -> Prog' (a, Prog' ())
     -> IO ()
-runTest name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
-    (Just a1, pe) <- coeval_ (refCreatorRunner $ runReaderT r) p0
+runTest runRefCreator name r p0 = showError $ handEr name $ flip evalStateT (ST [] [] 0 (0, Seq.empty)) $ do
+    (Just a1, pe) <- coeval_ (runRefCreator $ runReaderT r) p0
     (a2,p) <- getProg' pe
     when (a1 /= a2) $ fail' $ "results differ: " ++ show a1 ++ " vs " ++ show a2
     (_, pr) <- coeval_ (forever $ join $ singleton ReadI) p

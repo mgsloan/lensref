@@ -30,29 +30,30 @@ import Data.LensRef.Pure as Pure
 -----------------------------------------------------------------
 
 runTests :: IO ()
-runTests = tests (lift . Fast.liftRefWriter')
+runTests = tests Fast.runRefCreator (lift . Fast.liftRefWriter')
 
 runPerformanceTests :: Int -> IO ()
-runPerformanceTests = performanceTests Fast.liftRefWriter'
+runPerformanceTests = performanceTests Fast.runRefCreator Fast.liftRefWriter'
 
 runTestsPure :: IO ()
-runTestsPure = tests (lift . Pure.liftRefWriter')
+runTestsPure = tests Pure.runRefCreator (lift . Pure.liftRefWriter')
 
 runPerformanceTestsPure :: Int -> IO ()
-runPerformanceTestsPure = performanceTests Pure.liftRefWriter'
+runPerformanceTestsPure = performanceTests Pure.runRefCreator Pure.liftRefWriter'
 
 runTest__ = runTest
 
 -- | Look inside the sources for the tests.
 tests :: forall m
      . (MonadRefCreator m, EffectM m ~ Prog)
-    => (forall b . RefWriter m b -> Post m b)
+    => (forall a . ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
+    -> (forall b . RefWriter m b -> Post m b)
     -> IO ()
 
-tests liftRefWriter' = do
+tests runRefCreator liftRefWriter' = do
 
     let runTest :: (Eq a, Show a) => String -> Post m a -> Prog' (a, Prog' ()) -> IO ()
-        runTest = runTest__
+        runTest = runTest__ runRefCreator
 
     let writeRef' :: Ref m c -> c -> Post m ()
         writeRef' r = liftRefWriter' . writeRefSimple r
@@ -746,14 +747,15 @@ tests liftRefWriter' = do
 
 performanceTests :: forall m
      . (MonadRefCreator m)
-    => (forall b . RefWriter m b -> m b)
+    => (forall a . ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a)
+    -> (forall b . RefWriter m b -> m b)
     -> Int
     -> EffectM m ()
 
-performanceTests liftRefWriter' n = do
+performanceTests runRefCreator liftRefWriter' n = do
 
     let
-        runTest name m = refCreatorRunner $ const m
+        runTest name m = runRefCreator $ const m
 
         a ==? b | a == b = return ()
         a ==? b = fail $ show a ++ " /= " ++ show b

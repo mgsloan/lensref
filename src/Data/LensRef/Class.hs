@@ -203,7 +203,6 @@ class ( RefClass (BaseRef m)
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-    refCreatorRunner :: ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a
 
 -- | TODO
 class (Monad m, Applicative m) => MonadMemo m where

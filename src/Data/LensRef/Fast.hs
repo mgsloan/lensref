@@ -15,6 +15,7 @@ TODO
 -}
 module Data.LensRef.Fast
     ( RefCreator
+    , runRefCreator
     , liftRefWriter'
     ) where
 
@@ -304,13 +305,16 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = tellHand h
 
-    refCreatorRunner f = do
-        a <- newRef' $ const $ pure ()
-        b <- newRef' mempty
-        c <- newRef' $ return ()
-        d <- newRef' 0
-        let s = GlobalVars a b c d
-        unRegister (f $ flip unRegister s . runRefWriterT) s
+{-# SPECIALIZE runRefCreator :: ((RefWriterOf (RefReaderT IO) () -> IO ()) -> RefCreator IO a) -> IO a #-}
+runRefCreator :: NewRef m => ((RefWriterOf (RefReaderT m) () -> m ()) -> RefCreator m a) -> m a
+--runRefCreator :: (m ~ RefCreator n, NewRef n) => ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a
+runRefCreator f = do
+    a <- newRef' $ const $ pure ()
+    b <- newRef' mempty
+    c <- newRef' $ return ()
+    d <- newRef' 0
+    let s = GlobalVars a b c d
+    unRegister (f $ flip unRegister s . runRefWriterT) s
 
 -------------------- aux
 

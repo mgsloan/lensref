@@ -15,6 +15,7 @@ The implementation uses @unsafeCoerce@ internally, but its effect cannot escape.
 
 module Data.LensRef.Pure
     ( RefCreator
+    , runRefCreator
     , liftRefWriter'
     ) where
 
@@ -286,11 +287,12 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = RefCreator $ tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
-    refCreatorRunner f = do
-        r <- newRef' mempty
-        let run = modRef' r
-        let run' = modRef' r
-        run' . fmap fst . runWriterT . unRefCreator $ f $ run . runRefWriterT
+runRefCreator :: (m ~ RefCreator n, NewRef n) => ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a
+runRefCreator f = do
+    r <- newRef' mempty
+    let run = modRef' r
+    let run' = modRef' r
+    run' . fmap fst . runWriterT . unRefCreator $ f $ run . runRefWriterT
 
 
 ----------------------------------- aux
