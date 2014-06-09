@@ -5,8 +5,9 @@
 module Data.LensRef
     (
     -- * Core
-
+      module Data.LensRef.Class
     -- ** References
+{-
       unitRef
     , lensMap
             -- TODO: elim these?
@@ -23,7 +24,7 @@ module Data.LensRef
 
     -- ** Other
     , MonadMemo (..)
-
+-}
     , EqRefClass        --EqRefClass (..)
             , hasEffect
 --    , EqRefSimple
