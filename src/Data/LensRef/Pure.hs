@@ -39,18 +39,45 @@ import Data.LensRef.Common
 
 ---------------------------------
 
--- dynamic value
-data Dyn where Dyn :: a -> Dyn
-
 -- Each atomic reference has a unique identifier
 type Id (m :: * -> *) = Int
+type Ids (m :: * -> *) = Set.IntSet
 
 -- trigger id
 type TId (m :: * -> *) = Int
-
--- set of identifiers
-type Ids (m :: * -> *) = Set.IntSet
 type TIds (m :: * -> *) = Set.IntSet
+
+type St m = (ValSt, TriggerSt m, RevMap m)
+
+-- values of references
+type ValSt = Map.IntMap Dyn
+
+-- dynamic value
+data Dyn where Dyn :: a -> Dyn
+
+-- triggers
+type TriggerSt m = Map.IntMap (UpdateFunState m)
+
+-- reverse dependencies for efficiency
+-- x `elem` revmap ! s   <==>  s `elem` ((triggerst ! x) ^. dependencies . _2)
+type RevMap m = Map.IntMap (TIds m)
+
+data UpdateFunState m = UpdateFunState
+    { _alive :: Bool
+    , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
+    , _updateFun :: RefWriterT m ()    -- what to run if at least one of the dependency changes
+    }
+
+data Reference m a = Reference
+    { readRef_  :: RefReaderT m a        
+    , writeRef_ :: a -> RefWriterT m ()
+    , register
+        :: Bool                 -- True: run the following function initially
+        -> (a -> HandT m a)     -- trigger to be registered
+        -> RefCreator m ()         -- emits a handler
+    }
+
+----------
 
 -- collecting identifiers of references on whose values the return value depends on
 type TrackedT m = WriterT (Ids m)
@@ -77,39 +104,14 @@ type PostT m = ReaderT (RefWriterT m () -> m ())
 
 -- collecting handlers
 -- invariant property: the St state is only exteded, not changed
-type RefCreator m = PostT m (WriterT (Handler m) (StateT (St m) m))
-
-type St m = (ValSt, TriggerSt m, RevMap m)
-
--- values of references
-type ValSt = Map.IntMap Dyn
-
--- triggers
-type TriggerSt m = Map.IntMap (UpdateFunState m)
-
--- reverse dependencies for efficiency
--- x `elem` revmap ! s   <==>  s `elem` ((triggerst ! x) ^. dependencies . _2)
-type RevMap m = Map.IntMap (TIds m)
-
-data UpdateFunState m = UpdateFunState
-    { _alive :: Bool
-    , _dependencies :: (Id m, Ids m)       -- (i, dependencies of i)
-    , _updateFun :: RefWriterT m ()    -- what to run if at least one of the dependency changes
-    }
-
-data Reference m a = Reference
-    { readRef_  :: RefReaderT m a        
-    , writeRef_ :: a -> RefWriterT m ()
-    , register
-        :: Bool                 -- True: run the following function initially
-        -> (a -> HandT m a)     -- trigger to be registered
-        -> RefCreator m ()         -- emits a handler
-    }
+newtype RefCreator m a
+    = RefCreator { unRefCreator :: PostT m (WriterT (Handler m) (StateT (St m) m)) a }
+        deriving (Monad, Applicative, Functor, MonadFix)
 
 -------------------------------------
 
 newReference :: forall m a . (Monad m, Applicative m) => a -> RefCreator m (Reference m a)
-newReference a = do
+newReference a = RefCreator $ do
     ir <- use $ _1 . to nextKey
 {- show resource info
     (aa,bb,cc) <- get
@@ -150,7 +152,7 @@ newReference a = do
 --            when (not $ allUnique $ map (fst . _dependencies . (st Map.!)) l) $ fail "cycle"
             sequence_ $ map (_updateFun . (st Map.!)) l
 
-        , register = \init upd -> do
+        , register = \init upd -> RefCreator $ do
 
             let gv = mapReaderT (mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT))
                         $ liftRefReader' (RefReaderT getVal) >>= upd
@@ -203,7 +205,7 @@ joinReg m init a = do
         runHandler $ kill Kill
         ref <- liftRefReader' m
         fmap fst $ getHandler $ register ref init a
-    tell $ \msg -> MonadMonoid $ do
+    RefCreator $ tell $ \msg -> MonadMonoid $ do
         h <- runRefWriterT $ liftRefReader $ readRef_ r
         runMonadMonoid $ h msg
 
@@ -286,15 +288,15 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
                     return (((== a), ((m',h1,h2), b')), it: memo)
 
     onRegionStatusChange h
-        = tell $ MonadMonoid . runRefWriterT . liftEffectM . h
+        = RefCreator $ tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
-    askPostpone = ask
+    askPostpone = RefCreator ask
 
     runRegister write m = do
         r <- newRef' mempty
         let run = modRef' r
         let run' = modRef' r
-        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) $ m
+        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) . unRefCreator $ m
 
 ----------------------------------- aux
 
@@ -302,10 +304,12 @@ liftRefReader' :: (Monad m, Applicative m) => RefReaderT m a -> HandT m a
 liftRefReader' = lift . readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runRefReaderT
 
 dropHandler :: (Monad m, Applicative m) => RefCreator m a -> RefCreator m a
-dropHandler = mapReaderT $ lift . fmap fst . runWriterT
+dropHandler = mapRefCreator $ mapReaderT $ lift . fmap fst . runWriterT
 
 getHandler :: (Monad m, Applicative m) => RefCreator m a -> HandT m (Handler m, a)
-getHandler = mapReaderT $ mapStateT (lift . fmap (\((a,h),st)->((h,a),st))) . runWriterT
+getHandler = mapReaderT (mapStateT (lift . fmap (\((a,h),st)->((h,a),st))) . runWriterT) . unRefCreator
+
+mapRefCreator f = RefCreator . f . unRefCreator
 
 unsafeGet :: Dyn -> a
 unsafeGet (Dyn a) = unsafeCoerce a
@@ -314,7 +318,7 @@ runHandler :: (Monad m, Applicative m) => MonadMonoid (StateT (St m) m) () -> Ha
 runHandler = lift . mapStateT lift . runMonadMonoid
 
 liftRefWriter' :: (Monad m, Applicative m) => RefWriter (RefCreator m) a -> RefCreator m a
-liftRefWriter' = lift . lift . runRefWriterT
+liftRefWriter' = RefCreator . lift . lift . runRefWriterT
 
 ----------------------------------------- lenses
 
@@ -331,7 +335,7 @@ updateFun k (UpdateFunState a b c) = k c <&> \c' -> UpdateFunState a b c'
 
 instance (Monad m, Applicative m) => MonadRefReader (RefCreator m) where
     type BaseRef (RefCreator m) = Reference m
-    liftRefReader = lift . lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
+    liftRefReader = RefCreator . lift . lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
 
 instance (Monad m, Applicative m) => MonadRefReader (RefReaderT m) where
     type BaseRef (RefReaderT m) = Reference m
@@ -345,7 +349,7 @@ instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (RefReaderT m))
     liftRefWriter = id
 
 instance (NewRef m) => MonadMemo (RefCreator m) where
-    memoRead = memoRead_ $ \r -> lift . lift . runRefWriterT . writeRefSimple r
+    memoRead = memoRead_ $ \r -> RefCreator . lift . lift . runRefWriterT . writeRefSimple r
 
 instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) where
     type EffectM (RefWriterOf (RefReaderT m)) = m
@@ -353,10 +357,10 @@ instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) wh
 
 instance (Monad m, Applicative m) => MonadEffect (RefCreator m) where
     type EffectM (RefCreator m) = m
-    liftEffectM = lift . lift . lift
+    liftEffectM = RefCreator . lift . lift . lift
 
 -------------
-{-
+
 instance (MonadRefReader m) => MonadRefReader (ReaderT w m) where
     type BaseRef (ReaderT w m) = BaseRef m
     liftRefReader = lift . liftRefReader
@@ -368,6 +372,8 @@ instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
     onChangeEq r f   = ReaderT $ \st -> onChangeEq r $ fmap (flip runReaderT st) f
     onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
     onRegionStatusChange = lift . onRegionStatusChange
+    askPostpone      = lift askPostpone
+--    runRegister      = lift . runRegister     -- !!! can't lift
 
 instance (MonadMemo m) => MonadMemo (ReaderT w m) where
     memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m
@@ -375,7 +381,7 @@ instance (MonadMemo m) => MonadMemo (ReaderT w m) where
 instance (MonadEffect m) => MonadEffect (ReaderT w m) where
     type EffectM (ReaderT w m) = EffectM m
     liftEffectM = lift . liftEffectM
--}
+
 
 -------------------------- aux
 
