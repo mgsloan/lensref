@@ -261,7 +261,7 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
         r <- newReference st (const $ pure (), error "impossible #4")
         registerTrigger r True $ \(h, _) -> flip unRegister st $ do
             runM h Kill
-            getHandler $ liftRefReader m >>= f
+            runRefReaderT_ True m >>= getHandler . f
         return $ fmap snd $ readRef $ pure r
 
     onChangeEq (RefReaderTPure a) f = fmap RefReaderTPure $ f a
