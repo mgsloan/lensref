@@ -304,7 +304,7 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = tellHand h
 
-    refCreatorRunner write f = do
+    refCreatorRunner f = do
         a <- newRef' $ const $ pure ()
         b <- newRef' mempty
         c <- newRef' $ return ()

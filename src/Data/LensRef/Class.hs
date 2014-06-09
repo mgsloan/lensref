@@ -23,7 +23,6 @@ module Data.LensRef.Class
     , MonadRefCreator (..)
     , RegionStatusChange (..)
     , RegionStatusChangeHandler
-    , runRegister -- TODO: elim
 
     -- * Other
     , MonadMemo (..)
@@ -204,9 +203,7 @@ class ( RefClass (BaseRef m)
 
     onRegionStatusChange :: RegionStatusChangeHandler (EffectM m) -> m ()
 
-    refCreatorRunner :: (EffectM m () -> EffectM m ()) -> ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a
-
-runRegister w m = refCreatorRunner w $ \_ -> m
+    refCreatorRunner :: ((RefWriter m () -> EffectM m ()) -> m a) -> EffectM m a
 
 -- | TODO
 class (Monad m, Applicative m) => MonadMemo m where
@@ -264,7 +261,6 @@ instance MonadRefCreator m => MonadRefCreator (ReaderT w m) where
     onChangeEq_ r f  = ReaderT $ \st -> onChangeEq_ r $ fmap (flip runReaderT st) f
     onChangeMemo r f = ReaderT $ \st -> onChangeMemo r $ fmap (fmap (flip runReaderT st) . flip runReaderT st) f
     onRegionStatusChange = lift . onRegionStatusChange
---    runRegister      = lift . runRegister     -- !!! can't lift
 
 instance (MonadMemo m) => MonadMemo (ReaderT w m) where
     memoRead m = liftWith $ \unlift -> fmap restoreT $ memoRead $ unlift m

@@ -286,7 +286,7 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
     onRegionStatusChange h
         = RefCreator $ tell $ MonadMonoid . runRefWriterT . liftEffectM . h
 
-    refCreatorRunner write f = do
+    refCreatorRunner f = do
         r <- newRef' mempty
         let run = modRef' r
         let run' = modRef' r

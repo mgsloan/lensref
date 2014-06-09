@@ -753,7 +753,7 @@ performanceTests :: forall m
 performanceTests liftRefWriter' n = do
 
     let
-        runTest name m = runRegister (const $ return ()) m
+        runTest name m = refCreatorRunner $ const m
 
         a ==? b | a == b = return ()
         a ==? b = fail $ show a ++ " /= " ++ show b
