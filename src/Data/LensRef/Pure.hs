@@ -245,7 +245,7 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
         r <- newReference (mempty, error "impossible #4")
         register r True $ \(h, _) -> do
             runHandler $ h Kill
-            getHandler $ liftRefReader m >>= f
+            liftRefReader' m >>= getHandler . f
         return $ fmap snd $ readRef $ pure r
 
     onChangeEq_ m f = do

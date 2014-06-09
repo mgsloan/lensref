@@ -441,7 +441,7 @@ instance Applicative m => Applicative (RefReaderT m) where
 instance Monad m => Monad (RefReaderT m) where
 --    {-# SPECIALIZE instance Monad (RefReaderT IO) #-}
     {-# INLINE return #-}
-    return = return
+    return = RefReaderTPure
     {-# INLINE (>>=) #-}
     RefReaderTPure r >>= f = f r
     RefReaderT mr >>= f = RefReaderT $ \b -> mr b >>= runRefReaderT_ b . f
