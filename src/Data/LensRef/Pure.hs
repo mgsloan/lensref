@@ -92,7 +92,7 @@ newtype RefReaderT (m :: * -> *) a
         deriving (Monad, Applicative, Functor, MonadReader ValSt)
 
 -- invariant property: the values in St state are not changed, the state may be extended
-type HandT m = PostT m (StateT (St m) (TrackedT m m))
+type HandT m = StateT (St m) (TrackedT m m)
 
 newtype instance RefWriterOf (RefReaderT m) a
     = RefWriterT { runRefWriterT :: StateT (St m) m a }
@@ -100,12 +100,10 @@ newtype instance RefWriterOf (RefReaderT m) a
 
 type RefWriterT m = RefWriterOf (RefReaderT m)
 
-type PostT m = ReaderT (RefWriterT m () -> m ())
-
 -- collecting handlers
 -- invariant property: the St state is only exteded, not changed
 newtype RefCreator m a
-    = RefCreator { unRefCreator :: PostT m (WriterT (Handler m) (StateT (St m) m)) a }
+    = RefCreator { unRefCreator :: WriterT (Handler m) (StateT (St m) m) a }
         deriving (Monad, Applicative, Functor, MonadFix)
 
 -------------------------------------
@@ -154,10 +152,10 @@ newReference a = RefCreator $ do
 
         , register = \init upd -> RefCreator $ do
 
-            let gv = mapReaderT (mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT))
+            let gv = mapStateT (fmap (\((a,st),ids) -> ((a,ids),st)) . runWriterT)
                         $ liftRefReader' (RefReaderT getVal) >>= upd
 
-            (a, ih) <- mapReaderT lift gv
+            (a, ih) <- lift gv
             when init $ setVal a
 
             ri <- use $ _2 . to nextKey
@@ -165,10 +163,8 @@ newReference a = RefCreator $ do
             -- needed only for efficiency
             let changeRev f = Map.unionWith f . Map.fromSet (const $ Set.singleton ri)
 
-            p <- ask
-
             let modReg = do
-                    (a, ih) <- RefWriterT $ flip runReaderT p $ gv
+                    (a, ih) <- RefWriterT gv
                     setVal a
 
                     -- needed only for efficiency
@@ -294,19 +290,19 @@ instance (NewRef m) => MonadRefCreator (RefCreator m) where
         r <- newRef' mempty
         let run = modRef' r
         let run' = modRef' r
-        run' . fmap fst . runWriterT . flip runReaderT (write . run . runRefWriterT) . unRefCreator $ f $ run . runRefWriterT
+        run' . fmap fst . runWriterT . unRefCreator $ f $ run . runRefWriterT
 
 
 ----------------------------------- aux
 
 liftRefReader' :: (Monad m, Applicative m) => RefReaderT m a -> HandT m a
-liftRefReader' = lift . readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runRefReaderT
+liftRefReader' = readerToState (^. _1) . mapReaderT (mapWriterT $ return . runIdentity) . runRefReaderT
 
 dropHandler :: (Monad m, Applicative m) => RefCreator m a -> RefCreator m a
-dropHandler = mapRefCreator $ mapReaderT $ lift . fmap fst . runWriterT
+dropHandler = mapRefCreator $ lift . fmap fst . runWriterT
 
 getHandler :: (Monad m, Applicative m) => RefCreator m a -> HandT m (Handler m, a)
-getHandler = mapReaderT (mapStateT (lift . fmap (\((a,h),st)->((h,a),st))) . runWriterT) . unRefCreator
+getHandler = mapStateT (lift . fmap (\((a,h),st)->((h,a),st))) . runWriterT . unRefCreator
 
 mapRefCreator f = RefCreator . f . unRefCreator
 
@@ -314,10 +310,10 @@ unsafeGet :: Dyn -> a
 unsafeGet (Dyn a) = unsafeCoerce a
 
 runHandler :: (Monad m, Applicative m) => MonadMonoid (StateT (St m) m) () -> HandT m ()
-runHandler = lift . mapStateT lift . runMonadMonoid
+runHandler = mapStateT lift . runMonadMonoid
 
 liftRefWriter' :: (Monad m, Applicative m) => RefWriter (RefCreator m) a -> RefCreator m a
-liftRefWriter' = RefCreator . lift . lift . runRefWriterT
+liftRefWriter' = RefCreator . lift . runRefWriterT
 
 ----------------------------------------- lenses
 
@@ -334,7 +330,7 @@ updateFun k (UpdateFunState a b c) = k c <&> \c' -> UpdateFunState a b c'
 
 instance (Monad m, Applicative m) => MonadRefReader (RefCreator m) where
     type BaseRef (RefCreator m) = Reference m
-    liftRefReader = RefCreator . lift . lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
+    liftRefReader = RefCreator . lift . readerToState (^. _1) . mapReaderT (return . fst . runWriter) . runRefReaderT
 
 instance (Monad m, Applicative m) => MonadRefReader (RefReaderT m) where
     type BaseRef (RefReaderT m) = Reference m
@@ -348,7 +344,7 @@ instance (Monad m, Applicative m) => MonadRefWriter (RefWriterOf (RefReaderT m))
     liftRefWriter = id
 
 instance (NewRef m) => MonadMemo (RefCreator m) where
-    memoRead = memoRead_ $ \r -> RefCreator . lift . lift . runRefWriterT . writeRefSimple r
+    memoRead = memoRead_ $ \r -> RefCreator . lift . runRefWriterT . writeRefSimple r
 
 instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) where
     type EffectM (RefWriterOf (RefReaderT m)) = m
@@ -356,7 +352,7 @@ instance (Monad m, Applicative m) => MonadEffect (RefWriterOf (RefReaderT m)) wh
 
 instance (Monad m, Applicative m) => MonadEffect (RefCreator m) where
     type EffectM (RefCreator m) = m
-    liftEffectM = RefCreator . lift . lift . lift
+    liftEffectM = RefCreator . lift . lift
 
 -------------------------- aux
 
