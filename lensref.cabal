@@ -73,6 +73,7 @@ library
                     Data.LensRef.Pure
                     Data.LensRef.Fast
                     Data.LensRef
+                    Demo
   other-modules:
                     Control.Lens.Simple
   if flag(tests)
