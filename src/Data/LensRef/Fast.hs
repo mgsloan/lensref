@@ -6,7 +6,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
---{-# LANGUAGE UndecidableInstances #-}
 {- |
 Fast implementation for the @MonadRefCreator@ interface.
 
@@ -39,7 +38,7 @@ import Data.LensRef.Common
 data RefState m where
     RefState 
         :: a        -- ^ reference value
-        -> TIds m   -- ^ reverse dependencycoll (temporarily needed during topological sorting)
+        -> TIds m   -- ^ reverse dependency (temporarily needed during topological sorting)
         -> RefState m
 
 -- | trigger temporal state
@@ -62,11 +61,12 @@ data RefHandler m a = RefHandler
     }
 
 -- | global variables
+--{-# SPECIALIZE GlobalVars IO #-}
 data GlobalVars m = GlobalVars
-    { _handlercollection  :: Handler m   -- ^ collected handlers
-    , _dependencycoll     :: Ids m       -- ^ collected dependencies
-    , _postpone :: (m () -> m ())        -- ^ postpone action (never changes)
-    , _counter :: !Int                   -- ^ increasing counter
+    { _handlercollection  :: !(SRef m (Handler m))  -- ^ collected handlers
+    , _dependencycoll     :: !(SRef m (Ids m))      -- ^ collected dependencies
+    , _postpone           :: !(m () -> m ())        -- ^ postpone action
+    , _counter            :: !(SRef m Int)          -- ^ increasing counter
     }
 
 -- | reference identifier
@@ -94,7 +94,7 @@ data RefReaderT m a
 
 -- reference creator monad
 newtype Register m a
-    = Register { unRegister :: SRef m (GlobalVars m) -> m a }
+    = Register { unRegister :: GlobalVars m -> m a }
 
 -- reference writer monad
 newtype instance RefWriterOf (RefReaderT m) a
@@ -102,7 +102,7 @@ newtype instance RefWriterOf (RefReaderT m) a
         deriving (Monad, Applicative, Functor, MonadFix)
 
 -- trigger handlers
--- The registered triggers may be killed, blocked and unblocked via the handlercollection.
+-- The registered triggers may be killed, blocked and unblocked via the handler.
 type Handler m = RegionStatusChangeHandler (MonadMonoid m)
 
 ------------------------------
@@ -116,7 +116,7 @@ newReference a = Register $ \st -> do
         { readWrite = RefReaderT $ \b -> Register $ \st -> do
 
             RefState a nas <- readRef' oir
-            when b $ modRef' st $ dependencycoll %= Map.insert i oir
+            when b $ modRef' (_dependencycoll st) $ modify $ Map.insert i oir
 
             return $ (,) (unsafeCoerce a) $ \a -> do
 
@@ -156,10 +156,10 @@ newReference a = Register $ \st -> do
         , registerTrigger = \init upd -> Register $ \st -> do
 
             let gv = do
-                    modRef' st $ dependencycoll %= mempty
+                    writeRef' (_dependencycoll st) mempty
                     a <- readRef' oir >>= upd . unsafeGet
-                    h <- readRef' st
-                    return (a, h ^. dependencycoll)
+                    h <- readRef' $ _dependencycoll st
+                    return (a, h)
 
             (a, ih) <- gv
 
@@ -195,9 +195,8 @@ newReference a = Register $ \st -> do
 
                 -- TODO
                 when (msg == Unblock) $ do
-                    p <- readRef' st
                     TriggerState _ _ _ x _ <- readRef' ori
-                    _postpone p x
+                    _postpone st x
         }
 
 {-# SPECIALIZE joinReg :: RefReaderT IO (RefHandler IO a) -> Bool -> (a -> IO a) -> Register IO () #-}
@@ -310,7 +309,7 @@ readRef_ :: NewRef m => RefHandler m a -> RefReaderT m a
 readRef_ r = readWrite r <&> fst
 
 {-# INLINE ask #-}
-ask :: Monad m => Register m (SRef m (GlobalVars m))
+ask :: Monad m => Register m (GlobalVars m)
 ask = Register return
 
 {-# INLINE runRefReaderT_ #-}
@@ -325,52 +324,40 @@ liftRefWriter' = runRefWriterT
 
 {-# INLINE tellHand #-}
 tellHand :: (NewRef m) => Handler m -> Register m ()
-tellHand h = Register $ \st -> modRef' st $ handlercollection %= (`mappend` h)
+tellHand h = Register $ \st -> modRef' (_handlercollection st) $ modify (`mappend` h)
 
 {-# INLINE dropHandler #-}
 dropHandler :: NewRef m => Register m a -> Register m a
 dropHandler m = Register $ \st -> do
-    x <- readRef' st
+    x <- readRef' $ _handlercollection st
     a <- unRegister m st
-    modRef' st $ handlercollection .= (x ^. handlercollection)
+    writeRef' (_handlercollection st) x
     return a
 
 {-# INLINE getHandler #-}
 getHandler :: NewRef m => Register m a -> Register m (Handler m, a)
 getHandler m = Register $ \st -> do
-    h' <- modRef' st $ replace handlercollection mempty
+    let r = _handlercollection st
+    h' <- readRef' r
+    writeRef' r mempty
     a <- unRegister m st
-    h <- modRef' st $ replace handlercollection h'
+    h <- readRef' r
+    writeRef' r h'
     return (h, a)
-
-{-# INLINE replace #-}
-replace :: Monad m => Lens' s a -> a -> StateT s m a
-replace k x = do
-    x' <- use k
-    k .= x
-    return x'
 
 {-# INLINE unsafeGet #-}
 unsafeGet :: RefState m -> a
 unsafeGet (RefState a _) = unsafeCoerce a
 
 {-# INLINE newOrdRef #-}
-newOrdRef :: NewRef m => SRef m (GlobalVars m) -> a -> m (OrdRef m a)
-newOrdRef st a = do
-    GlobalVars x y z c <- readRef' st
-    writeRef' st $ GlobalVars x y z $ succ c
+newOrdRef :: NewRef m => GlobalVars m -> a -> m (OrdRef m a)
+newOrdRef (GlobalVars _ _ _ st) a = do
+    c <- readRef' st
+    writeRef' st $ succ c
     r <- newRef' a
     return $ OrdRef c r
 
 -------------- lenses
-
-{-# INLINE handlercollection #-}
-handlercollection :: Lens' (GlobalVars m) (Handler m)
-handlercollection k (GlobalVars a b c d) = k a <&> \a' -> GlobalVars a' b c d
-
-{-# INLINE dependencycoll #-}
-dependencycoll :: Lens' (GlobalVars m) (Ids m)
-dependencycoll k (GlobalVars a b c d) = k b <&> \b' -> GlobalVars a b' c d
 
 {-# INLINE dependencies #-}
 dependencies :: Lens' (TriggerState m) (Ids m)
@@ -487,12 +474,13 @@ instance NewRef m => MonadEffect (Register m) where
 instance NewRef m => MonadRegister (Register m) where
 --    {-# SPECIALIZE instance MonadRegister (Register IO) #-}
     askPostpone = Register $ \st -> do
-        p <- readRef' st
-        return $ _postpone p . flip unRegister st . runRefWriterT
+        return $ _postpone st . flip unRegister st . runRefWriterT
 
     runRegister write m = do
-        s <- newRef' $ GlobalVars mempty mempty write 0
-        unRegister m s
+        a <- newRef' mempty
+        b <- newRef' mempty
+        c <- newRef' 0
+        unRegister m $ GlobalVars a b write c
 
 instance Eq (OrdRef m a) where
 --    {-# SPECIALIZE instance Eq (OrdRef IO a) #-}

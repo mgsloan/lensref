@@ -49,6 +49,12 @@ type Prog = ProgramT (Inst) (State (Int, Seq.Seq Any))
 
 ---------------------------------------------------
 
+--sRefProg :: (forall x . StateT a (Prog) x -> Prog x) -> SRef Prog a
+sRefProg = SRefProg
+
+--runSRefProg :: SRef Prog a -> StateT a (Prog) x -> Prog x
+--runSRefProg = undefined
+
 newtype SRefProg a = SRefProg { runSRefProg :: forall x . StateT a (Prog) x -> Prog x }
 
 instance NewRef (Prog) where
@@ -236,7 +242,7 @@ coeval__  op p = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        coeval_  (k $ SRefProg $ ff a) p
+        coeval_  (k $ sRefProg $ ff a) p
 
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s
@@ -320,7 +326,7 @@ eval__  op = do
                     modify $ over _2 $ Seq.update n $ Any w'
                     pure x
         (vars . _2) %= (Seq.|> Any a)
-        eval_  (k $ SRefProg $ ff a)
+        eval_  (k $ sRefProg $ ff a)
 {-
     (_, Send i@(Port pi) s :>>= k) -> do
         tell_ $ "send " ++ show i ++ " " ++ show s

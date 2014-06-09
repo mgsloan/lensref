@@ -39,6 +39,8 @@ merge (x:xs) (y:ys) = case compare x y of
 
 ----------------
 
+--type SRef (m :: * -> *) = IORef
+
 class (Monad m, Applicative m) => NewRef m where
 
     -- simple reference
