@@ -20,9 +20,6 @@ module Data.LensRef
 
     -- ** Reference creation
     , MonadRefCreator (..)
-    , onChangeEq
-    , onChangeMemo
-    , postponeModification
 
     -- ** Other
     , MonadMemo (..)
@@ -48,16 +45,6 @@ import Control.Lens.Simple --(set)
 import Data.LensRef.Class
 
 --------------------------------
-
-
--- | TODO
-postponeModification :: MonadRefCreator m => RefWriter m () -> m ()
-postponeModification m = askPostpone >>= liftEffectM . ($ m)
-
-
-
-
-
 
 {- | Reference with inherent equivalence.
 

@@ -461,30 +461,6 @@ tests liftRefWriter' = do
             message' "H f"
 -}
 
-    runTest "postponed0" (postponeModification $ message "hello") $ do
-        pure $ (,) () $ do
-            message' "hello"
-
-    runTest "postponed-write" (do
-        r <- newRef "x"
-        _ <- onChangeEq (readRef r) message
-        postponeModification $ writeRef r "y"
-            ) $ do
-        message' "x"
-        pure $ (,) () $ do
-            message' "y"
-
-    runTest "postponed" (do
-        r <- newRef "x"
-        _ <- onChangeEq (readRef r) message
-        postponeModification $ writeRef r "x"
-        postponeModification $ writeRef r "y"
-        pure ()
-            ) $ do
-        message' "x"
-        pure $ (,) () $ do
-            message' "y"
-
     runTest "onChangeEq" (do
         r <- newRef "x"
         listen 1 $ writeRef r
@@ -604,17 +580,23 @@ tests liftRefWriter' = do
             q2 = _2 `lensMap` q
         _ <- onChangeEq (readRef r) $ message . show
         _ <- onChangeEq (readRef q) $ message . show
-        postponeModification $ writeRef r Nothing
-        postponeModification $ writeRef q1 True
-        postponeModification $ writeRef q2 1
+        listen 0 $ writeRef r
+        listen 1 $ writeRef q1
+        listen 2 $ writeRef q2
         ) $ do
         message' "Just 3"
         message' "(True,3)"
+        message' "listener #0"
+        message' "listener #1"
+        message' "listener #2"
         pure $ (,) () $ do
+            send 0 (Nothing :: Maybe Int)
             message' "Nothing"
             message' "(False,3)"
+            send 1 True
             message' "Just 3"
             message' "(True,3)"
+            send 2 (1 :: Int)
             message' "Just 1"
             message' "(True,1)"
 
@@ -624,22 +606,19 @@ tests liftRefWriter' = do
         r <- newRef (0 :: Int)
         q <- onChangeEq (readRef r) pure
         _ <- onChangeEq q $ message . show
-        postponeModification $ message "a" >> writeRef r 1
-        postponeModification $ message "b" >> writeRef r 2
-        postponeModification $ message "c" >> writeRef r 3
-        postponeModification $ message "d" >> writeRef r 3
-        postponeModification $ message "e" >> writeRef r 4
+        listen 0 $ writeRef r
         ) $ do
         message' "0"
+        message' "listener #0"
         pure $ (,) () $ do
-            message' "a"
+            send 0 (1 :: Int)
             message' "1"
-            message' "b"
+            send 0 (2 :: Int)
             message' "2"
-            message' "c"
+            send 0 (3 :: Int)
             message' "3"
-            message' "d"
-            message' "e"
+            send 0 (3 :: Int)
+            send 0 (4 :: Int)
             message' "4"
 
     runTest "schedule" (do
@@ -647,19 +626,20 @@ tests liftRefWriter' = do
         q <- newRef "b"
         _ <- onChangeEq (readRef r) message
         _ <- onChangeEq (readRef q) message
-        postponeModification $ message "." >> writeRef r "x" >> writeRef q "y"
-        postponeModification $ message ".." >> writeRef q "1" >> writeRef r "2"
+        listen 0 $ \(x,y) -> writeRef r x >> writeRef q y
+        listen 1 $ \(x,y) -> writeRef q y >> writeRef r x
         ) $ do
         message' "a"
         message' "b"
+        message' "listener #0"
+        message' "listener #1"
         pure $ (,) () $ do
-            message' "."
+            send 0 ("x", "y")
             message' "x"
             message' "y"
-            message' ".."
---- TODO
-            message' "1"
+            send 1 ("1", "2")
             message' "2"
+            message' "1"
 {- TODO
     runTest "diamond" (do
         r <- newRef "a"
