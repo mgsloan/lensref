@@ -113,7 +113,6 @@ class ( Applicative m, Monad m
 
     {- | @readRef@ === @liftRefReader . readRefSimple@
     -}
-    {-# INLINE readRef #-}
     readRef :: (RefClass r, RefReaderOf m ~ RefReaderSimple r) => RefSimple r a -> m a
     readRef = liftRefReader . readRefSimple
 
@@ -138,12 +137,10 @@ class ( MonadRefReader m
 
     {- | @writeRef r@ === @liftRefWriter . writeRefSimple r@
     -}
-    {-# INLINE writeRef #-}
     writeRef :: (RefClass r, RefReaderSimple r ~ RefReaderOf m) => RefSimple r a -> a -> m ()
     writeRef r = liftRefWriter . writeRefSimple r
 
     -- | @modRef r f@ === @readRef r >>= writeRef r . f@
-    {-# INLINE modRef #-}
     modRef :: (RefClass r, RefReaderSimple r ~ RefReaderOf m) => RefSimple r a -> (a -> a) -> m ()
     r `modRef` f = readRef r >>= writeRef r . f
 

@@ -25,9 +25,9 @@ module Data.LensRef.Fast
 import Data.Maybe
 import Data.Monoid
 import Data.IORef
-import qualified Data.IntMap as Map
+import qualified Data.IntMap.Strict as Map
 import Control.Applicative
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Identity
 import Control.Lens.Simple
 
@@ -57,7 +57,11 @@ data TriggerState m = TriggerState
 -- | reference handler
 data RefHandler m a = RefHandler
     { readWrite           -- reader and writer actions
-        :: !(forall f . Functor f => ((a -> f a) -> Bool -> m (f (m ()))))
+        :: !(forall f . Functor f
+            => (a -> f a)
+            -> Bool       -- Only for efficiency. Enable tracking of dependencies.
+            -> m (f (m ()))
+            )
     , registerTrigger     -- how to register a trigger
         :: (a -> m a)     -- trigger to be registered
         -> Bool           -- True: run the trigger initially also
@@ -65,7 +69,6 @@ data RefHandler m a = RefHandler
     }
 
 -- | global variables
---{-# SPECIALIZE GlobalVars IO #-}
 data GlobalVars m = GlobalVars
     { _handlercollection  :: !(SRef m (Handler m))  -- ^ collected handlers
     , _dependencycoll     :: !(SRef m (Ids m))      -- ^ collected dependencies
@@ -93,7 +96,7 @@ type OrdRefSet m a = Map.IntMap (SRef m a)
 
 -- reference reader monad
 data RefReader m a
-    = RefReader (Bool -> RefCreator m a)
+    = RefReader !(Bool -> RefCreator m a)
     | RefReaderTPure a
 
 -- reference creator monad
@@ -113,7 +116,7 @@ type Handler m = RegionStatusChangeHandler m
 
 ------------------------------
 
-{-# SPECIALIZE newReference :: GlobalVars IO -> a -> IO (RefHandler IO a) #-}
+-- {-# SPECIALIZE newReference :: GlobalVars IO -> a -> IO (RefHandler IO a) #-}
 newReference :: forall m a . NewRef m => GlobalVars m -> a -> m (RefHandler m a)
 newReference st a = do
     ir@(OrdRef i oir) <- newOrdRef st $ RefState a mempty
@@ -209,7 +212,7 @@ newReference st a = do
                     modRef' (_postpone st) $ modify (>> x)
         }
 
-{-# SPECIALIZE joinReg :: GlobalVars IO -> RefReader IO (RefHandler IO a) -> Bool -> (a -> IO a) -> IO () #-}
+-- {-# SPECIALIZE joinReg :: GlobalVars IO -> RefReader IO (RefHandler IO a) -> Bool -> (a -> IO a) -> IO () #-}
 joinReg :: NewRef m => GlobalVars m -> RefReader m (RefHandler m a) -> Bool -> (a -> m a) -> m ()
 joinReg _ (RefReaderTPure r) init a = registerTrigger r a init
 joinReg st (RefReader m) init a = do
@@ -223,7 +226,7 @@ joinReg st (RefReader m) init a = do
         flip unRegister st $ runM h msg
 
 instance NewRef m => RefClass (RefHandler m) where
-    {-# SPECIALIZE instance RefClass (RefHandler IO) #-}
+--    {-# SPECIALIZE instance RefClass (RefHandler IO) #-}
     type RefReaderSimple (RefHandler m) = RefReader m
 
     unitRef = pure $ RefHandler
@@ -235,7 +238,6 @@ instance NewRef m => RefClass (RefHandler m) where
     readRefSimple (RefReaderTPure r) = RefReader $ \b -> RefCreator $ \st -> readWrite r Const b <&> getConst
     readRefSimple (RefReader m) = RefReader $ \b -> m b >>= runRefReaderT_ b . readRef_
 
---    {-# INLINE writeRefSimple #-}
     writeRefSimple (RefReaderTPure r) a
         = RefWriter $ RefCreator $ \st ->
             readWrite r (const $ Identity a) False >>= runIdentity
@@ -255,18 +257,18 @@ instance NewRef m => RefClass (RefHandler m) where
 instance NewRef m => MonadRefCreator (RefCreator m) where
     {-# SPECIALIZE instance MonadRefCreator (RefCreator IO) #-}
 
-    newRef a = RefCreator $ \st -> fmap pure $ newReference st a
+    newRef a = RefCreator $ \st -> pure <$> newReference st a
 
     extRef m k a0 = do
         st <- ask
         r <- RefCreator $ \st -> newReference st a0
         -- TODO: remove dropHandler?
         dropHandler $ RefCreator $ \st -> do
-            joinReg st m False $ \_ -> flip unRegister st $ runRefReaderT_ True $ fmap (^. k) $ readRef_ r
-            flip (registerTrigger r) True $ \a -> flip unRegister st $ runRefReaderT_ True $ fmap (\b -> set k b a) $ readRefSimple m
+            joinReg st m False $ \_ -> flip unRegister st $ runRefReaderT_ True $ readRef_ r <&> (^. k)
+            flip (registerTrigger r) True $ \a -> flip unRegister st $ runRefReaderT_ True $ readRefSimple m <&> \b -> set k b a
         return $ pure r
 
-    onChange (RefReaderTPure a) f = fmap RefReaderTPure $ f a
+    onChange (RefReaderTPure a) f = RefReaderTPure <$> f a
     onChange m f = RefCreator $ \st -> do
         r <- newReference st (const $ pure (), error "impossible #4")
         flip (registerTrigger r) True $ \(h, _) -> flip unRegister st $ do
@@ -310,48 +312,41 @@ instance NewRef m => MonadRefCreator (RefCreator m) where
                     (h1, m') <- getHandler $ f a
                     (h2, b') <- getHandler m'
                     return (((== a), ((m',h1,h2), b')), it: memo)
-        return $ fmap (snd . snd . fst) $ readRef_ r
+        return $ readRef_ r <&> snd . snd . fst
 
     onRegionStatusChange h
         = tellHand h
 
-{-# SPECIALIZE runRefCreator :: ((RefWriterOf_ (RefReader IO) () -> IO ()) -> RefCreator IO a) -> IO a #-}
-runRefCreator :: NewRef m => ((RefWriterOf_ (RefReader m) () -> m ()) -> RefCreator m a) -> m a
---runRefCreator :: (m ~ RefCreator n, NewRef n) => ((RefWriterOf m () -> EffectM m ()) -> m a) -> EffectM m a
+--{-# SPECIALIZE runRefCreator :: ((RefWriter IO () -> IO ()) -> RefCreator IO a) -> IO a #-}
+runRefCreator :: NewRef m => ((RefWriter m () -> m ()) -> RefCreator m a) -> m a
 runRefCreator f = do
-    a <- newRef' $ const $ pure ()
-    b <- newRef' mempty
-    c <- newRef' $ return ()
-    d <- newRef' 0
-    let s = GlobalVars a b c d
-    unRegister (f $ flip unRegister s . runRefWriterT) s
+    s <- GlobalVars
+            <$> newRef' (const $ pure ())
+            <*> newRef' mempty
+            <*> newRef' (return ())
+            <*> newRef' 0
+    flip unRegister s $ f $ flip unRegister s . runRefWriterT
 
 -------------------- aux
 
-{-# INLINE readRef_ #-}
 readRef_ :: NewRef m => RefHandler m a -> RefReader m a
 readRef_ r = RefReader $ \b -> RefCreator $ \st -> readWrite r Const b <&> getConst
 
-{-# INLINE ask #-}
 ask :: Monad m => RefCreator m (GlobalVars m)
 ask = RefCreator return
 
-{-# INLINE runRefReaderT_ #-}
 runRefReaderT_ :: Monad m => Bool -> RefReader m a -> RefCreator m a
 runRefReaderT_ _ (RefReaderTPure a) = return a
 runRefReaderT_ b (RefReader x) = x b
 
 runM m k = RefCreator . const $ m k
 
-{-# NOINLINE liftRefWriter' #-}
 liftRefWriter' :: RefWriterOf_ (RefReader m) a -> RefCreator m a
 liftRefWriter' = runRefWriterT
 
-{-# INLINE tellHand #-}
 tellHand :: (NewRef m) => Handler m -> RefCreator m ()
 tellHand h = RefCreator $ \st -> modRef' (_handlercollection st) $ modify $ \f msg -> f msg >> h msg
 
-{-# INLINE dropHandler #-}
 dropHandler :: NewRef m => RefCreator m a -> RefCreator m a
 dropHandler m = RefCreator $ \st -> do
     x <- readRef' $ _handlercollection st
@@ -359,7 +354,6 @@ dropHandler m = RefCreator $ \st -> do
     writeRef' (_handlercollection st) x
     return a
 
-{-# INLINE getHandler #-}
 getHandler :: NewRef m => RefCreator m a -> RefCreator m (Handler m, a)
 getHandler m = RefCreator $ \st -> do
     let r = _handlercollection st
@@ -370,11 +364,9 @@ getHandler m = RefCreator $ \st -> do
     writeRef' r h'
     return (h, a)
 
-{-# INLINE unsafeGet #-}
 unsafeGet :: RefState m -> a
 unsafeGet (RefState a _) = unsafeCoerce a
 
-{-# INLINE newOrdRef #-}
 newOrdRef :: NewRef m => GlobalVars m -> a -> m (OrdRef m a)
 newOrdRef (GlobalVars _ _ _ st) a = do
     c <- readRef' st
@@ -384,19 +376,15 @@ newOrdRef (GlobalVars _ _ _ st) a = do
 
 -------------- lenses
 
-{-# INLINE dependencies #-}
 dependencies :: Lens' (TriggerState m) (Ids m)
 dependencies k (TriggerState a b c d e) = k c <&> \c' -> TriggerState a b c' d e
 
-{-# INLINE alive #-}
 alive :: Lens' (TriggerState m) Bool
 alive k (TriggerState a b c d e) = k a <&> \a' -> TriggerState a' b c d e
 
-{-# INLINE reverseDeps #-}
 reverseDeps :: Lens' (TriggerState m) (TIds m)
 reverseDeps k (TriggerState a b c d e) = k e <&> \e' -> TriggerState a b c d e'
 
-{-# INLINE revDep #-}
 revDep :: Lens' (RefState m) (TIds m)
 revDep k (RefState a b) = k b <&> \b' -> RefState a b'
 
@@ -404,28 +392,21 @@ revDep k (RefState a b) = k b <&> \b' -> RefState a b'
 
 instance Monad m => Monoid (RefCreator m ()) where
 --    {-# SPECIALIZE instance Monoid (RefCreator IO ()) #-}
-    {-# INLINE mempty #-}
     mempty = return ()
-    {-# INLINE mappend #-}
     m `mappend` n = m >> n
 
 instance Monad m => Monad (RefCreator m) where
 --    {-# SPECIALIZE instance Monad (RefCreator IO) #-}
-    {-# INLINE return #-}
     return = RefCreator . const . return
-    {-# INLINE (>>=) #-}
     RefCreator m >>= f = RefCreator $ \r -> m r >>= \a -> unRegister (f a) r
 
 instance Applicative m => Applicative (RefCreator m) where
 --    {-# SPECIALIZE instance Applicative (RefCreator IO) #-}
-    {-# INLINE pure #-}
     pure = RefCreator . const . pure
-    {-# INLINE (<*>) #-}
     RefCreator f <*> RefCreator g = RefCreator $ \r -> f r <*> g r
 
 instance Functor m => Functor (RefCreator m) where
 --    {-# SPECIALIZE instance Functor (RefCreator IO) #-}
-    {-# INLINE fmap #-}
     fmap f (RefCreator m) = RefCreator $ fmap f . m
 
 instance MonadFix m => MonadFix (RefCreator m) where
@@ -434,15 +415,12 @@ instance MonadFix m => MonadFix (RefCreator m) where
 
 instance Functor m => Functor (RefReader m) where
 --    {-# SPECIALIZE instance Functor (RefReader IO) #-}
-    {-# INLINE fmap #-}
     fmap f (RefReaderTPure x) = RefReaderTPure $ f x
-    fmap f (RefReader mr) = RefReader $ \b -> fmap f $ mr b
+    fmap f (RefReader m) = RefReader $ fmap f . m
 
 instance Applicative m => Applicative (RefReader m) where
 --    {-# SPECIALIZE instance Applicative (RefReader IO) #-}
-    {-# INLINE pure #-}
     pure = RefReaderTPure
-    {-# INLINE (<*>) #-}
     RefReaderTPure f <*> RefReaderTPure a = RefReaderTPure $ f a
     mf <*> ma = RefReader $ \b -> runRefReaderT b mf <*> runRefReaderT b ma
       where
@@ -451,57 +429,44 @@ instance Applicative m => Applicative (RefReader m) where
 
 instance Monad m => Monad (RefReader m) where
 --    {-# SPECIALIZE instance Monad (RefReader IO) #-}
-    {-# INLINE return #-}
     return = RefReaderTPure
-    {-# INLINE (>>=) #-}
     RefReaderTPure r >>= f = f r
     RefReader mr >>= f = RefReader $ \b -> mr b >>= runRefReaderT_ b . f
 
 instance NewRef m => MonadRefReader (RefCreator m) where
-    {-# SPECIALIZE instance MonadRefReader (RefCreator IO) #-}
+--    {-# SPECIALIZE instance MonadRefReader (RefCreator IO) #-}
     type BaseRef (RefCreator m) = RefHandler m
---    {-# INLINE liftRefReader #-}
     liftRefReader = runRefReaderT_ False
 
 instance NewRef m => MonadRefReader (RefReader m) where
-    {-# SPECIALIZE instance MonadRefReader (RefReader IO) #-}
+--    {-# SPECIALIZE instance MonadRefReader (RefReader IO) #-}
     type BaseRef (RefReader m) = RefHandler m
---    {-# INLINE liftRefReader #-}
     liftRefReader m = RefReader $ \_ -> runRefReaderT_ False m
     readRef = readRefSimple
 
 instance NewRef m => MonadRefReader (RefWriterOf_ (RefReader m)) where
-    {-# SPECIALIZE instance MonadRefReader (RefWriterOf_ (RefReader IO)) #-}
+--    {-# SPECIALIZE instance MonadRefReader (RefWriterOf_ (RefReader IO)) #-}
     type BaseRef (RefWriterOf_ (RefReader m)) = RefHandler m
---    {-# INLINE liftRefReader #-}
     liftRefReader = RefWriter . runRefReaderT_ False
 
 instance NewRef m => MonadRefWriter (RefWriterOf_ (RefReader m)) where
-    {-# SPECIALIZE instance MonadRefWriter (RefWriterOf_ (RefReader IO)) #-}
---    {-# INLINE liftRefWriter #-}
+--    {-# SPECIALIZE instance MonadRefWriter (RefWriterOf_ (RefReader IO)) #-}
     liftRefWriter = id
 
 instance NewRef m => MonadMemo (RefCreator m) where
---    {-# SPECIALIZE instance MonadMemo (RefCreator IO) #-}
     memoRead = memoRead_ $ \r -> runRefWriterT . writeRefSimple r
 
 instance NewRef m => MonadEffect (RefWriterOf_ (RefReader m)) where
---    {-# SPECIALIZE instance MonadEffect (RefWriterOf_ (RefReader IO)) #-}
     type EffectM (RefWriterOf_ (RefReader m)) = m
---    {-# INLINE liftEffectM #-}
     liftEffectM = RefWriter . RefCreator . const
 
 instance NewRef m => MonadEffect (RefCreator m) where
---    {-# SPECIALIZE instance MonadEffect (RefCreator IO) #-}
     type EffectM (RefCreator m) = m
---    {-# INLINE liftEffectM #-}
     liftEffectM = RefCreator . const
 
 instance Eq (OrdRef m a) where
---    {-# SPECIALIZE instance Eq (OrdRef IO a) #-}
     OrdRef i _ == OrdRef j _ = i == j
 
 instance Ord (OrdRef m a) where
---    {-# SPECIALIZE instance Ord (OrdRef IO a) #-}
     OrdRef i _ `compare` OrdRef j _ = i `compare` j
 
