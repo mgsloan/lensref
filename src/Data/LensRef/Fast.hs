@@ -58,7 +58,7 @@ data TriggerState m = TriggerState
 data RefHandler m a = RefHandler
     { readWrite           -- reader and writer actions
         :: !(forall f . Functor f => (Bool -> (a -> f a) -> m (f (m ()))))
-    , registerTrigger     -- how to registerTrigger a trigger
+    , registerTrigger     -- how to register a trigger
         :: Bool           -- True: run the trigger initially also
         -> (a -> m a)     -- trigger to be registered
         -> m ()
@@ -246,13 +246,11 @@ instance NewRef m => RefClass (RefHandler m) where
 
     lensMap k (RefReaderTPure r) = pure $ RefHandler
         { readWrite = \b -> readWrite r b . k
-        , registerTrigger = \init f -> registerTrigger r init
-                        $ \a -> f (a ^. k) <&> \b -> set k b a
+        , registerTrigger = \init f -> registerTrigger r init $ k f
         }
     lensMap k mr = RefReader $ \_ -> RefCreator $ \st -> pure $ RefHandler
         { readWrite = \b f -> flip unRegister st (runRefReaderT_ b mr) >>= \r -> readWrite r b $ k f
-        , registerTrigger = \init f -> joinReg st mr init
-                        $ \a -> f (a ^. k) <&> \b -> set k b a
+        , registerTrigger = \init f -> joinReg st mr init $ k f
         }
 
 instance NewRef m => MonadRefCreator (RefCreator m) where
