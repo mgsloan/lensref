@@ -28,6 +28,7 @@ import Data.IORef
 import qualified Data.IntMap as Map
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Identity
 import Control.Lens.Simple
 
 import Unsafe.Coerce
@@ -56,12 +57,13 @@ data TriggerState m = TriggerState
 -- | reference handler
 data RefHandler m a = RefHandler
     { readWrite           -- reader and writer actions
-        :: !(Bool -> m (a, a -> m ()))
+        :: !(forall f . Functor f => (Bool -> (a -> f a) -> m (f (m ()))))
     , registerTrigger     -- how to registerTrigger a trigger
         :: Bool           -- True: run the trigger initially also
         -> (a -> m a)     -- trigger to be registered
         -> m ()
     }
+
 
 -- | global variables
 --{-# SPECIALIZE GlobalVars IO #-}
@@ -118,12 +120,12 @@ newReference st a = do
     ir@(OrdRef i oir) <- newOrdRef st $ RefState a mempty
 
     return RefHandler
-        { readWrite = \b -> do
+        { readWrite = \b f -> do
 
             RefState a nas <- readRef' oir
             when b $ modRef' (_dependencycoll st) $ modify $ Map.insert i oir
 
-            return $ (,) (unsafeCoerce a) $ \a -> do
+            return $ f (unsafeCoerce a) <&> \a -> do
 
                 writeRef' oir $ RefState a nas
 
@@ -226,29 +228,29 @@ instance NewRef m => RefClass (RefHandler m) where
     type RefReaderSimple (RefHandler m) = RefReader m
 
     unitRef = pure $ RefHandler
-        { readWrite = \_ -> pure ((), const $ pure ())
+        { readWrite = \_ x -> pure $ x () <&> const (pure ())
         , registerTrigger  = const $ const $ pure ()
         }
 
     {-# INLINE readRefSimple #-}
-    readRefSimple (RefReaderTPure r) = RefReader $ \b -> RefCreator $ \st -> readWrite r b <&> fst
+    readRefSimple (RefReaderTPure r) = RefReader $ \b -> RefCreator $ \st -> readWrite r b Const <&> getConst
     readRefSimple (RefReader m) = RefReader $ \b -> m b >>= runRefReaderT_ b . readRef_
 
 --    {-# INLINE writeRefSimple #-}
     writeRefSimple (RefReaderTPure r) a
-        = RefWriter $ RefCreator $ \st -> readWrite r False >>= ($ a) . (^. _2)
+        = RefWriter $ RefCreator $ \st ->
+            readWrite r False (const $ Identity a) >>= runIdentity
     writeRefSimple (RefReader mr) a
-        = RefWriter $ mr False >>= \r -> RefCreator $ \st -> readWrite r False >>= ($ a) . (^. _2)
+        = RefWriter $ mr False >>= \r -> RefCreator $ \st ->
+            readWrite r False (const $ Identity a) >>= runIdentity
 
     lensMap k (RefReaderTPure r) = pure $ RefHandler
-        { readWrite = \b -> readWrite r b
-                        <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
+        { readWrite = \b -> readWrite r b . k
         , registerTrigger = \init f -> registerTrigger r init
                         $ \a -> f (a ^. k) <&> \b -> set k b a
         }
     lensMap k mr = RefReader $ \_ -> RefCreator $ \st -> pure $ RefHandler
-        { readWrite = \b -> (flip unRegister st (runRefReaderT_ b mr) >>= flip readWrite b)
-                        <&> \(a, s) -> (a ^. k, \b -> s $ set k b a)
+        { readWrite = \b f -> flip unRegister st (runRefReaderT_ b mr) >>= \r -> readWrite r b $ k f
         , registerTrigger = \init f -> joinReg st mr init
                         $ \a -> f (a ^. k) <&> \b -> set k b a
         }
@@ -331,13 +333,14 @@ runRefCreator f = do
 
 {-# INLINE readRef_ #-}
 readRef_ :: NewRef m => RefHandler m a -> RefReader m a
-readRef_ r = RefReader $ \b -> RefCreator $ \st -> readWrite r b <&> fst
+readRef_ r = RefReader $ \b -> RefCreator $ \st -> readWrite r b Const <&> getConst
 
 {-# INLINE ask #-}
 ask :: Monad m => RefCreator m (GlobalVars m)
 ask = RefCreator return
 
 {-# INLINE runRefReaderT_ #-}
+runRefReaderT_ :: Monad m => Bool -> RefReader m a -> RefCreator m a
 runRefReaderT_ _ (RefReaderTPure a) = return a
 runRefReaderT_ b (RefReader x) = x b
 
@@ -467,7 +470,8 @@ instance NewRef m => MonadRefReader (RefReader m) where
     {-# SPECIALIZE instance MonadRefReader (RefReader IO) #-}
     type BaseRef (RefReader m) = RefHandler m
 --    {-# INLINE liftRefReader #-}
-    liftRefReader = id
+    liftRefReader m = RefReader $ \_ -> runRefReaderT_ False m
+    readRef = readRefSimple
 
 instance NewRef m => MonadRefReader (RefWriterOf_ (RefReader m)) where
     {-# SPECIALIZE instance MonadRefReader (RefWriterOf_ (RefReader IO)) #-}
