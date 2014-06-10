@@ -246,11 +246,11 @@ instance NewRef m => RefClass (RefHandler m) where
 
     lensMap k (RefReaderTPure r) = pure $ RefHandler
         { readWrite = \b -> readWrite r b . k
-        , registerTrigger = \init f -> registerTrigger r init $ k f
+        , registerTrigger = \init -> registerTrigger r init . k
         }
     lensMap k mr = RefReader $ \_ -> RefCreator $ \st -> pure $ RefHandler
         { readWrite = \b f -> flip unRegister st (runRefReaderT_ b mr) >>= \r -> readWrite r b $ k f
-        , registerTrigger = \init f -> joinReg st mr init $ k f
+        , registerTrigger = \init -> joinReg st mr init . k
         }
 
 instance NewRef m => MonadRefCreator (RefCreator m) where
