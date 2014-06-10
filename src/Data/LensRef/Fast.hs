@@ -87,7 +87,7 @@ type TId  m = OrdRef m (TriggerState m)
 type TIds m = OrdRefSet m (TriggerState m)
 
 -- | IORef with Ord instance
-data OrdRef    m a = OrdRef !Int !(SRef m a)
+type OrdRef    m a = (Int, SRef m a)
 -- | IORefs with Ord instance
 type OrdRefSet m a = Map.IntMap (SRef m a)
 
@@ -96,7 +96,7 @@ type OrdRefSet m a = Map.IntMap (SRef m a)
 
 -- reference reader monad
 data RefReader m a
-    = RefReader !(Bool -> RefCreator m a)
+    = RefReader !(Bool -> RefCreator m a)       -- RefReader !(RefCreator m a) !(RefCreator m a)
     | RefReaderTPure a
 
 -- reference creator monad
@@ -118,7 +118,7 @@ type Handler m = RegionStatusChangeHandler m
 
 newReference :: forall m a . NewRef m => GlobalVars m -> a -> m (RefHandler m a)
 newReference st a = do
-    ir@(OrdRef i oir) <- newOrdRef st $ RefState a mempty
+    ir@(i, oir) <- newOrdRef st $ RefState a mempty
 
     return RefHandler
         { readWrite = \f b -> do
@@ -133,32 +133,34 @@ newReference st a = do
                 when (not $ Map.null nas) $ do
 
                     let ch :: TId m -> m [TId m]
-                        ch (OrdRef _ n) = do
-                            TriggerState _ (OrdRef _ w) dep _ _ <- readRef' n
+                        ch (_, n) = do
+                            TriggerState _ (_, w) dep _ _ <- readRef' n
                             RefState _ revDep <- readRef' w
-                            fmap (map $ uncurry OrdRef) $ flip filterM (Map.toList revDep) $ \(_, na) -> do
-                                TriggerState alive (OrdRef i _) _ _ _ <- readRef' na
+                            flip filterM (Map.toList revDep) $ \(_, na) -> do
+                                TriggerState alive (i, _) _ _ _ <- readRef' na
                                 pure $ alive && not (Map.member i dep)
 
-                        topSort [] = pure ()
-                        topSort (p@(OrdRef i op):ps) = do
-                            readRef' op >>= _updateFun
+                        collects p = mapM_ (collect p) =<< ch p
 
-                            let del (OrdRef _ n) = modRef' n $ do
-                                    reverseDeps %= Map.delete i
-                                    use $ reverseDeps . to Map.null
-                            ys <- filterM del =<< ch p
-                            topSort $ merge ps ys
-
-                        collects v = mapM_ (collect v) =<< ch v
-                        collect (OrdRef i op) v@(OrdRef _ ov) = do
+                        collect (i, op) v@(_, ov) = do
                             notvisited <- modRef' ov $ do
                                 reverseDeps %= Map.insert i op
                                 use $ reverseDeps . to Map.null
                             when notvisited $ collects v
 
-                    as <- fmap (map $ uncurry OrdRef) $ (`filterM` Map.toList nas) $ \(_, na) -> readRef' na <&> (^. alive)
+                    as <- (`filterM` Map.toList nas) $ \(_, na) -> readRef' na <&> (^. alive)
                     mapM_ collects as
+
+                    let topSort [] = pure ()
+                        topSort (p@(i, op):ps) = do
+                            readRef' op >>= _updateFun
+
+                            let del (_, n) = modRef' n $ do
+                                    reverseDeps %= Map.delete i
+                                    use $ reverseDeps . to Map.null
+                            ys <- filterM del =<< ch p
+                            topSort $ mergeBy (\(i, _) (j, _) -> compare i j) ps ys
+
                     topSort as
 
                     p <- readRef' (_postpone st)
@@ -177,38 +179,40 @@ newReference st a = do
 
             when init $ modRef' oir $ modify $ \(RefState _ s) -> RefState a s
 
-            OrdRef i ori <- newOrdRef st $ error "impossible"
+            when (not $ Map.null ih) $ do
 
-            let addRev, delRev :: SRef m (RefState m) -> m ()
-                addRev x = modRef' x $ revDep %= Map.insert i ori
-                delRev x = modRef' x $ revDep %= Map.delete i
+                (i, ori) <- newOrdRef st $ error "impossible"
 
-                modReg = do
-                    (a, ih) <- gv
+                let addRev, delRev :: SRef m (RefState m) -> m ()
+                    addRev x = modRef' x $ revDep %= Map.insert i ori
+                    delRev x = modRef' x $ revDep %= Map.delete i
 
-                    ih' <- readRef' ori <&> (^. dependencies)
-                    mapM_ delRev $ Map.elems $ ih' `Map.difference` ih
-                    mapM_ addRev $ Map.elems $ ih `Map.difference` ih'
+                    modReg = do
+                        (a, ih) <- gv
 
-                    modRef' oir $ modify $ \(RefState _ s) -> RefState a s
-                    modRef' ori $ dependencies .= ih
+                        ih' <- readRef' ori <&> (^. dependencies)
+                        mapM_ delRev $ Map.elems $ ih' `Map.difference` ih
+                        mapM_ addRev $ Map.elems $ ih `Map.difference` ih'
 
-            writeRef' ori $ TriggerState True ir ih modReg mempty
+                        modRef' oir $ modify $ \(RefState _ s) -> RefState a s
+                        modRef' ori $ dependencies .= ih
 
-            mapM_ addRev $ Map.elems ih
+                writeRef' ori $ TriggerState True ir ih modReg mempty
 
-            flip unRegister st $ tellHand $ \msg -> do
+                mapM_ addRev $ Map.elems ih
 
-                modRef' ori $ alive .= (msg == Unblock)
+                flip unRegister st $ tellHand $ \msg -> do
 
-                when (msg == Kill) $ do
-                    ih' <- readRef' ori
-                    mapM_ delRev $ Map.elems $ ih' ^. dependencies
+                    modRef' ori $ alive .= (msg == Unblock)
 
-                -- TODO
-                when (msg == Unblock) $ do
-                    TriggerState _ _ _ x _ <- readRef' ori
-                    modRef' (_postpone st) $ modify (>> x)
+                    when (msg == Kill) $ do
+                        ih' <- readRef' ori
+                        mapM_ delRev $ Map.elems $ ih' ^. dependencies
+
+                    -- TODO
+                    when (msg == Unblock) $ do
+                        TriggerState _ _ _ x _ <- readRef' ori
+                        modRef' (_postpone st) $ modify (>> x)
         }
 
 joinReg :: NewRef m => GlobalVars m -> RefReader m (RefHandler m a) -> Bool -> (a -> m a) -> m ()
@@ -368,7 +372,7 @@ newOrdRef (GlobalVars _ _ _ st) a = do
     c <- readRef' st
     writeRef' st $ succ c
     r <- newRef' a
-    return $ OrdRef c r
+    return (c, r)
 
 -------------- lenses
 
@@ -447,10 +451,4 @@ instance NewRef m => MonadEffect (RefWriterOf_ (RefReader m)) where
 instance NewRef m => MonadEffect (RefCreator m) where
     type EffectM (RefCreator m) = m
     liftEffectM = RefCreator . const
-
-instance Eq (OrdRef m a) where
-    OrdRef i _ == OrdRef j _ = i == j
-
-instance Ord (OrdRef m a) where
-    OrdRef i _ `compare` OrdRef j _ = i `compare` j
 
