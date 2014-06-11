@@ -37,6 +37,14 @@ merge (x:xs) (y:ys) = case compare x y of
     GT -> y: merge (x:xs) ys
     EQ -> x: merge xs ys
 
+mergeBy :: (a -> a -> Ordering) -> [a] -> [a] -> [a]
+mergeBy _ [] xs = xs
+mergeBy _ xs [] = xs
+mergeBy p (x:xs) (y:ys) = case p x y of
+    LT -> x: mergeBy p xs (y:ys)
+    GT -> y: mergeBy p (x:xs) ys
+    EQ -> x: mergeBy p xs ys
+
 ----------------
 
 --type SRef (m :: * -> *) = IORef
