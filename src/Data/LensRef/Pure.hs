@@ -21,9 +21,7 @@ module Data.LensRef.Pure
     , liftRefWriter'
     ) where
 
--- import Data.Monoid
 import Data.Maybe
-import Data.List
 import qualified Data.IntSet as Set
 import qualified Data.IntMap as Map
 import Control.Applicative
@@ -102,7 +100,7 @@ newtype instance RefWriterOf_ (RefReader m) a
 type RefWriter m = RefWriterOf_ (RefReader m)
 
 -- collecting handlers
--- invariant property: the St state is only exteded, not changed
+-- invariant property: the St state is only extended, not changed
 newtype RefCreator m a
     = RefCreator { unRefCreator :: WriterT (Handler m) (StateT (St m) m) a }
         deriving (Monad, Applicative, Functor, MonadFix)

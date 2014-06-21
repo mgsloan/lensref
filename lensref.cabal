@@ -85,12 +85,10 @@ library
                     Data.LensRef.TestEnv
                     Data.LensRef.Test
 
-  ghc-options: 
-                    -Wall 
-                    -fno-warn-incomplete-patterns 
-                    -fno-warn-name-shadowing 
-                    -fno-warn-missing-signatures 
-                    -fno-warn-orphans
+  ghc-options:
+                    -Wall
+                    -fno-warn-name-shadowing
+                    -fno-warn-missing-signatures
                     -fno-warn-type-defaults
 
 test-suite runtests
@@ -115,5 +113,3 @@ benchmark lensref-performance-test
   if flag(tests)
     cpp-options:
                     -D__TESTS__
-
-

@@ -24,7 +24,6 @@ module Data.LensRef.Fast
 --import Debug.Trace
 import Data.Maybe
 import Data.Monoid
-import Data.IORef
 import qualified Data.IntMap.Strict as Map
 import Control.Applicative
 import Control.Monad.State.Strict
@@ -256,7 +255,8 @@ instance NewRef m => RefClass (RefHandler m) where
         }
 
 instance NewRef m => MonadRefCreator (RefCreator m) where
-    {-# SPECIALIZE instance MonadRefCreator (RefCreator IO) #-}
+    --FIXME: causes many match_co warnings
+    -- {-# SPECIALIZE instance MonadRefCreator (RefCreator IO) #-}
 
     newRef a = RefCreator $ \st -> pure <$> newReference st a
 
