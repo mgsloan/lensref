@@ -23,7 +23,6 @@ import Control.Lens.Simple hiding (view)
 import Unsafe.Coerce
 
 import Data.LensRef
-import Data.LensRef.Class
 import Data.LensRef.Common
 
 --------------------------
@@ -367,6 +366,3 @@ runTest runRefCreator name r p0 = showError $ handEr name $ flip evalStateT (ST 
 
 showError [] = pure ()
 showError xs = fail $ "\n" ++ unlines xs
-
-
-
