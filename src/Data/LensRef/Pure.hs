@@ -70,7 +70,7 @@ data UpdateFunState m = UpdateFunState
     }
 
 data Reference m a = Reference
-    { readRef_  :: RefReader m a        
+    { readRef_  :: RefReader m a
     , writeRef_ :: a -> RefWriter m ()
     , register
         :: Bool                 -- True: run the following function initially

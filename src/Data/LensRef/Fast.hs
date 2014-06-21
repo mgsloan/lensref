@@ -39,7 +39,7 @@ import Data.LensRef.Common
 
 -- | reference temporal state
 data RefState m where
-    RefState 
+    RefState
         :: a        -- reference value
         -> TIds m   -- reverse dependency (temporarily needed during topological sorting)
         -> RefState m
@@ -451,4 +451,3 @@ instance NewRef m => MonadEffect (RefWriterOf_ (RefReader m)) where
 instance NewRef m => MonadEffect (RefCreator m) where
     type EffectM (RefCreator m) = m
     liftEffectM = RefCreator . const
-

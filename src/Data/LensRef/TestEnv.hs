@@ -59,7 +59,7 @@ sRefProg = SRefProg
 newtype SRefProg a = SRefProg { runSRefProg :: forall x . StateT a (Prog) x -> Prog x }
 
 instance NewRef (Prog) where
-    type SRef (Prog) = SRefProg 
+    type SRef (Prog) = SRefProg
     newRef' = singleton . NewRef
     modRef' = runSRefProg
 --    newId = singleton NewId
@@ -116,7 +116,7 @@ getProg' p = case runIdentity . viewT $ p of
     Error' s :>>= p -> do
         fail' $ "end expected instead of unfail " ++ s
         getProg' $ p ()
-  
+
 
 type Er = Writer [Either (Either String String) String] --ErrorT String (Writer [String])
 
